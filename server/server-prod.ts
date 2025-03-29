@@ -23,9 +23,9 @@ const app = express();
 
 // CORS middleware
 app.use(cors({
-  origin: ["https://starlit-syrnki-6db2bc.netlify.app", "http://localhost:3000", "http://localhost:5000"],
-  credentials: true
-}));
+    origin: ["https://stockwell.netlify.app", "http://localhost:3000", "http://localhost:5000"],
+    credentials: true
+  }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -82,7 +82,7 @@ app.use((req, res, next) => {
     res.status(200).json({ 
       message: "Hospital Inventory API Server", 
       status: "running",
-      frontend: "https://starlit-syrnki-6db2bc.netlify.app"
+      frontend: "https://stockwell.netlify.app"
     });
   });
 

@@ -1,5 +1,28 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+// Add this API_URL constant at the top of the file
+const API_URL = import.meta.env.PROD 
+  ? "https://stockwell.onrender.com/api"
+  : "/api";
+
+// Helper to prefix API paths
+function getFullUrl(path: string): string {
+  // If the path already includes http(s), don't prefix it
+  if (path.startsWith('http')) {
+    return path;
+  }
+  
+  // Make sure path starts with / for consistency
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  
+  // If path already starts with /api, don't add it again
+  if (normalizedPath.startsWith('/api')) {
+    return `${API_URL.replace('/api', '')}${normalizedPath}`;
+  }
+  
+  return `${API_URL}${normalizedPath}`;
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
@@ -12,7 +35,10 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  const res = await fetch(url, {
+  // Use the getFullUrl helper to ensure the URL is properly prefixed
+  const fullUrl = getFullUrl(url);
+  
+  const res = await fetch(fullUrl, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
@@ -29,7 +55,10 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey[0] as string, {
+    // Use the getFullUrl helper to ensure the URL is properly prefixed
+    const fullUrl = getFullUrl(queryKey[0] as string);
+    
+    const res = await fetch(fullUrl, {
       credentials: "include",
     });
 
