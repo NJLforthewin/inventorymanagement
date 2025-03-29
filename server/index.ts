@@ -1,8 +1,16 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import cors from "cors"; // Add this import
 
 const app = express();
+
+// Add CORS middleware with proper configuration
+app.use(cors({
+  origin: ["https://starlit-syrnki-6db2bc.netlify.app", "http://localhost:3000", "http://localhost:5000"],
+  credentials: true
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -56,10 +64,8 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
+  // Update port to use environment variable for Render
+  const port = process.env.PORT || 5000;
   server.listen({
     port,
     host: "0.0.0.0",
