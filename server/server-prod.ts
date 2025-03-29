@@ -3,6 +3,7 @@ import { registerRoutes } from "./routes";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
+import { initDb } from './db-postgres';  // Make sure this path matches where you saved the db.ts file
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,7 +16,6 @@ function log(message: string, source = "express") {
     second: "2-digit",
     hour12: true,
   });
-
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
@@ -23,9 +23,9 @@ const app = express();
 
 // CORS middleware
 app.use(cors({
-    origin: ["https://stockwells.netlify.app", "http://localhost:3000", "http://localhost:5000"],
-    credentials: true
-  }));
+  origin: ["https://stockwells.netlify.app", "http://localhost:3000", "http://localhost:5000"],
+  credentials: true
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -62,6 +62,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize database
+  await initDb();
+  
   const server = await registerRoutes(app);
 
   // Error handling middleware
@@ -70,7 +73,7 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    console.error(`Error [${status}]:`, err); // Log instead of throw
+    console.error(`Error [${status}]:`, err);
   });
 
   // API-only server - no static file serving in production
@@ -80,7 +83,7 @@ app.use((req, res, next) => {
     }
     
     res.status(200).json({ 
-      message: "Hospital Inventory API Server", 
+      message: "Stock Well API Server", 
       status: "running",
       frontend: "https://stockwells.netlify.app"
     });
@@ -91,6 +94,6 @@ app.use((req, res, next) => {
     port,
     host: "0.0.0.0",
   }, () => {
-    log(`API server running on port ${port}`);
+    log(`API server running on port ${port} with PostgreSQL database`);
   });
 })();
