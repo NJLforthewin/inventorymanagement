@@ -1,16 +1,19 @@
 import { useState, ReactNode } from "react";
 import { Sidebar, MobileSidebarToggle } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/use-auth";
-import { ChevronDown, User, Settings, LogOut } from "lucide-react";
+import { ChevronDown, LogOut } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+
+// Import logo images
+import logoFull from "@/assets/logo.png";
+import logoIcon from "@/assets/logo-icon.png.png";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -35,13 +38,23 @@ export function AppLayout({ children, title }: AppLayoutProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-200">
+    <div className="min-h-screen flex flex-col bg-neutral-200 no-scrollbar">
       {/* Header */}
       <header className="bg-white shadow-sm z-10 fixed top-0 left-0 right-0">
         <div className="flex justify-between items-center px-4 py-3">
           <div className="flex items-center">
             <MobileSidebarToggle setMobileSidebarOpen={setMobileSidebarOpen} />
-            <h1 className="ml-2 text-xl font-semibold text-neutral-600">Hospital Inventory System</h1>
+            <div className="ml-2 flex items-center">
+              {/* Desktop view - show full logo */}
+              <div className="hidden md:flex items-center">
+                <img src={logoFull} alt="Stock Well" className="h-7" />
+              </div>
+              
+              {/* Mobile view - show only icon */}
+              <div className="flex md:hidden items-center">
+                <img src={logoIcon} alt="Stock Well" className="h-8 w-auto" />
+              </div>
+            </div>
           </div>
           <div className="flex items-center space-x-4">
             <div className="hidden md:flex items-center">
@@ -60,15 +73,6 @@ export function AppLayout({ children, title }: AppLayoutProps) {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem>
-                  <User className="mr-2 h-4 w-4" />
-                  <span>Profile</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Settings className="mr-2 h-4 w-4" />
-                  <span>Settings</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleLogout}>
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>Sign out</span>

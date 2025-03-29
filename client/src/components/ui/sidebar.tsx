@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useQuery } from "@tanstack/react-query";
+import { InventoryItem } from "@shared/schema";
 import {
   BarChart3,
   Clipboard,
@@ -23,6 +25,16 @@ export function Sidebar({ isMobileSidebarOpen, setMobileSidebarOpen }: SidebarPr
   const [location] = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+
+  // Query to fetch low stock items
+  const { data: lowStockItems } = useQuery<InventoryItem[]>({
+    queryKey: ["/api/dashboard/low-stock"],
+  });
+
+  // Calculate counts of critical and low stock items
+  const criticalItems = lowStockItems?.filter(item => item.status === "out_of_stock") || [];
+  const lowItems = lowStockItems?.filter(item => item.status === "low_stock") || [];
+  const totalAlertCount = (criticalItems.length + lowItems.length) || 0;
 
   // Close sidebar on route change on mobile
   useEffect(() => {
@@ -81,9 +93,14 @@ export function Sidebar({ isMobileSidebarOpen, setMobileSidebarOpen }: SidebarPr
               >
                 <span className="w-6 text-center">{item.icon}</span>
                 <span className="ml-3">{item.label}</span>
-                {item.href === "/stock-alerts" && (
-                  <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                    5
+                {item.href === "/stock-alerts" && totalAlertCount > 0 && (
+                  <span 
+                    className={cn(
+                      "ml-auto text-white text-xs font-bold px-2 py-1 rounded-full", 
+                      criticalItems.length > 0 ? "bg-red-500" : "bg-yellow-500"
+                    )}
+                  >
+                    {totalAlertCount}
                   </span>
                 )}
               </Link>

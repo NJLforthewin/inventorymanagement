@@ -217,10 +217,10 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
                   <FormItem>
                     <FormLabel>Department</FormLabel>
                     <Select 
-                      onValueChange={field.onChange} 
-                      defaultValue={field.value.toString()}
-                      value={field.value.toString()}
-                    >
+                          onValueChange={field.onChange} 
+                         defaultValue={field.value?.toString() || ""}
+                          value={field.value?.toString() || ""}
+                          >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select Department" />
@@ -245,10 +245,10 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
                   <FormItem>
                     <FormLabel>Category</FormLabel>
                     <Select 
-                      onValueChange={field.onChange} 
-                      defaultValue={field.value.toString()}
-                      value={field.value.toString()}
-                    >
+                          onValueChange={field.onChange} 
+                         defaultValue={field.value?.toString() || ""}
+                          value={field.value?.toString() || ""}
+                          >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select Category" />

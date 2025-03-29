@@ -201,11 +201,11 @@ export default function AuditLogPage() {
           <div className="flex flex-wrap gap-4">
             <div className="w-full sm:w-auto">
               <Select 
-                value={filters.userId?.toString() || ""}
+                value={filters.userId?.toString() ||"all" }
                 onValueChange={(value) => 
                   setFilters({ 
                     ...filters, 
-                    userId: value ? parseInt(value) : undefined 
+                    userId: value !== "all" ? parseInt(value) : undefined 
                   })
                 }
               >
@@ -213,31 +213,31 @@ export default function AuditLogPage() {
                   <SelectValue placeholder="All Users" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Users</SelectItem>
-                  {users?.map((user) => (
-                    <SelectItem key={user.id} value={user.id.toString()}>
-                      {user.name}
-                    </SelectItem>
+                <SelectItem value="all">All Users</SelectItem>
+        {users?.map((user) => (
+          <SelectItem key={user.id} value={user.id.toString()}>
+            {user.name}
+          </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             
             <div className="w-full sm:w-auto">
-              <Select 
-                value={filters.activityType || ""}
-                onValueChange={(value) => 
-                  setFilters({ 
-                    ...filters, 
-                    activityType: value || undefined 
-                  })
+            <Select 
+      value={filters.activityType || "all"}
+      onValueChange={(value) => 
+        setFilters({ 
+          ...filters, 
+          activityType: value !== "all" ? value : undefined 
+        })
                 }
               >
                 <SelectTrigger className="w-full min-w-[200px]">
                   <SelectValue placeholder="All Activities" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Activities</SelectItem>
+                <SelectItem value="all">All Activities</SelectItem>
                   <SelectItem value="created">Created</SelectItem>
                   <SelectItem value="updated">Updated</SelectItem>
                   <SelectItem value="deleted">Deleted</SelectItem>
