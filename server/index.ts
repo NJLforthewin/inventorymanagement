@@ -7,7 +7,7 @@ const app = express();
 
 // Add CORS middleware with proper configuration
 app.use(cors({
-  origin: ["https://starlit-syrnki-6db2bc.netlify.app", "http://localhost:3000", "http://localhost:5000"],
+  origin: ["https://stockwells.netlify.app", "http://localhost:3000", "http://localhost:5000"],
   credentials: true
 }));
 

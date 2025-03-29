@@ -23,7 +23,7 @@ const app = express();
 
 // CORS middleware
 app.use(cors({
-    origin: ["https://stockwell.netlify.app", "http://localhost:3000", "http://localhost:5000"],
+    origin: ["https://stockwells.netlify.app", "http://localhost:3000", "http://localhost:5000"],
     credentials: true
   }));
 
@@ -82,7 +82,7 @@ app.use((req, res, next) => {
     res.status(200).json({ 
       message: "Hospital Inventory API Server", 
       status: "running",
-      frontend: "https://stockwell.netlify.app"
+      frontend: "https://stockwells.netlify.app"
     });
   });
 
