@@ -199,6 +199,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next(err);
   };
   
+
+  app.post("/api/debug/force-user-create", async (req, res) => {
+    try {
+      console.log('Forcing admin user creation with direct SQL...');
+      
+      // Import the hashPassword function
+      const { hashPassword } = await import('./utils/password');
+      
+      // Create admin password
+      const adminPassword = await hashPassword('admin123');
+      console.log('Generated hashed password');
+      
+      // First delete any existing admin user to avoid conflicts
+      await db.execute(sql`DELETE FROM users WHERE username = 'admin'`);
+      console.log('Cleaned up any existing admin user');
+      
+      // Try direct SQL insertion
+      try {
+        console.log('Inserting new admin user...');
+        const insertResult = await db.execute(sql`
+          INSERT INTO users (name, username, email, password, role, department, active, created_at)
+          VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
+          RETURNING id, username, role
+        `);
+        
+        console.log('Insert result:', insertResult);
+        
+        // Also create a staff user
+        const staffPassword = await hashPassword('staff123');
+        await db.execute(sql`
+          INSERT INTO users (name, username, email, password, role, department, active, created_at)
+          VALUES ('Staff User', 'staff', 'staff@hospital.org', ${staffPassword}, 'staff', 'Emergency', true, NOW())
+          RETURNING id
+        `);
+        
+        // Check users table with direct query
+        const userCheck = await db.execute(sql`SELECT * FROM users`);
+        console.log('User count from direct query:', userCheck.length);
+        
+        // Also check with storage method for comparison
+        const storageUser = await storage.getUserByUsername('admin');
+        console.log('Storage getUserByUsername result:', storageUser ? 'Found user' : 'User not found');
+        
+        res.status(200).json({
+          success: true,
+          usersCreated: true,
+          userCount: userCheck.length,
+          directQueryFound: userCheck.length > 0,
+          storageMethodFound: !!storageUser,
+          firstUser: userCheck.length > 0 ? {
+            id: userCheck[0].id,
+            username: userCheck[0].username,
+            role: userCheck[0].role
+          } : null
+        });
+      } catch (sqlError) {
+        console.error('SQL insertion error:', sqlError);
+        res.status(500).json({
+          success: false,
+          error: String(sqlError)
+        });
+      }
+    } catch (error: any) {
+      console.error('Force user create error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+  
+  // Debug endpoint to test direct SQL query vs storage method
+  app.get("/api/debug/check-users-direct", async (req, res) => {
+    try {
+      // Direct SQL query to check users
+      const directUsers = await db.execute(sql`SELECT * FROM users`);
+      console.log('Direct SQL users count:', directUsers.length);
+      
+      // Storage method to check users
+      const { users, total } = await storage.getUsers();
+      console.log('Storage method users count:', total);
+      
+      // Check admin user specifically
+      const adminDirect = await db.execute(sql`SELECT * FROM users WHERE username = 'admin'`);
+      const adminStorage = await storage.getUserByUsername('admin');
+      
+      res.status(200).json({
+        directQuery: {
+          userCount: directUsers.length,
+          adminFound: adminDirect.length > 0,
+          adminUser: adminDirect.length > 0 ? {
+            id: adminDirect[0].id,
+            username: adminDirect[0].username,
+            role: adminDirect[0].role
+          } : null
+        },
+        storageMethod: {
+          userCount: total,
+          adminFound: !!adminStorage,
+          adminUser: adminStorage ? {
+            id: adminStorage.id,
+            username: adminStorage.username,
+            role: adminStorage.role
+          } : null
+        }
+      });
+    } catch (error: any) {
+      console.error('Check users direct error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+  
   app.post("/api/debug/create-tables", async (req, res) => {
     try {
       console.log('Creating database tables...');
