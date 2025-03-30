@@ -289,14 +289,21 @@ export class DatabaseStorage implements IStorage {
   
   async getUserByUsername(username: string): Promise<User | undefined> {
     try {
-      const [user] = await db.select().from(users).where(eq(users.username, username));
-      return user;
+      // Direct SQL approach for more reliability
+      const result = await db.execute(sql`
+        SELECT * FROM users WHERE username = ${username}
+      `);
+      
+      // Check if rows property exists and has items
+      if (result.rows && result.rows.length > 0) {
+        return result.rows[0] as User;
+      }
+      return undefined;
     } catch (error) {
       console.error("Error getting user by username:", error);
       throw error;
     }
   }
-  
   async getUserByEmail(email: string): Promise<User | undefined> {
     try {
       const [user] = await db.select().from(users).where(eq(users.email, email));
@@ -347,26 +354,25 @@ export class DatabaseStorage implements IStorage {
     try {
       const offset = (page - 1) * limit;
       
-      const usersResult = await db
-        .select()
-        .from(users)
-        .limit(limit)
-        .offset(offset);
+      // Use direct SQL for reliability
+      const usersResult = await db.execute(sql`
+        SELECT * FROM users
+        LIMIT ${limit} OFFSET ${offset}
+      `);
       
-        const [{ count }] = await db
-        .select({ count: sql`count(*)` })
-        .from(users);
-        
+      const countResult = await db.execute(sql`
+        SELECT COUNT(*) as count FROM users
+      `);
+      
       return {
-        users: usersResult,
-        total: Number(count)
+        users: (usersResult.rows || []) as User[],
+        total: Number(countResult.rows?.[0]?.count || 0)
       };
     } catch (error) {
       console.error("Error getting users:", error);
       throw error;
     }
   }
-  
   async toggleUserActive(id: number): Promise<User | undefined> {
     try {
       const [user] = await db.select().from(users).where(eq(users.id, id));
