@@ -885,7 +885,7 @@ async getUserByUsername(username: string): Promise<User | undefined> {
     return undefined;
   } catch (error) {
     console.error("Error getting user by username:", error);
-    throw error;
+    throw error; 
   }
 }
 

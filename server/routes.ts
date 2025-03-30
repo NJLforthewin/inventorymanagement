@@ -313,7 +313,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     }
   });
-  
+
   app.post("/api/debug/create-tables", async (req, res) => {
     try {
       console.log('Creating database tables...');
@@ -490,6 +490,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/debug/db-ping", async (req, res) => {
+    try {
+      // Use a very simple query with raw SQL
+      const result = await executeSqlQuery("SELECT NOW() as current_time");
+      
+      res.status(200).json({
+        success: true,
+        dbResponding: true,
+        result: result,
+        message: "Database connection working"
+      });
+    } catch (error: any) {
+      console.error('Database ping error:', error);
+      res.status(500).json({
+        success: false,
+        dbResponding: false,
+        error: error.message || String(error),
+        stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
+      });
+    }
+  });
 
   app.use('/api', (req, res, next) => {
     console.log(`${req.method} ${req.path}`);
