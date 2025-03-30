@@ -27,7 +27,7 @@ app.set("trust proxy", 1);
 // CORS middleware with expanded configuration
 app.use(cors({
   origin: [
-    "https://stockwells.netlify.app", 
+    "https://stockwell.netlify.app", 
     "http://localhost:3000", 
     "http://localhost:5000", 
     "http://localhost:5173"
@@ -124,7 +124,7 @@ app.use((req, res, next) => {
       message: "Stock Well API Server", 
       status: "running",
       environment: process.env.NODE_ENV || 'development',
-      frontend: "https://stockwells.netlify.app"
+      frontend: "https://stockwell.netlify.app"
     });
   });
 
