@@ -5,8 +5,7 @@ import axios from 'axios';
 const API_URL = import.meta.env.PROD 
   ? "https://stockwell.onrender.com/api"
   : "/api";
-
-console.log('API URL configured as:', API_URL);
+console.log("API URL configured as:", API_URL);
 
 // Create dedicated API client
 const apiClient = axios.create({
