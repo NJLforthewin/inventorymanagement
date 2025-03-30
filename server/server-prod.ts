@@ -7,7 +7,21 @@ import { initDb } from './db-postgres';
 import { setupAuth } from './auth';
 import MemoryStore from 'memorystore';
 import session from "express-session";
+import passport from "passport";
 import 'dotenv/config';
+
+// Add this type declaration for session.user
+declare module 'express-session' {
+  interface SessionData {
+    user: {
+      id: number;
+      username: string;
+      name: string;
+      role: string;
+      department: string;
+    };
+  }
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -111,6 +125,10 @@ app.use(session({
     path: '/'
   }
 }));
+
+// Initialize passport here, before routes
+app.use(passport.initialize());
+app.use(passport.session());
 
 // Add health check endpoint FIRST so it's available immediately
 app.get("/health", (req, res) => {
@@ -243,6 +261,110 @@ app.get("/api/check-users", async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// Add direct login endpoint
+app.post("/api/direct-login", async (req, res) => {
+  try {
+    console.log('Direct login attempt:', req.body);
+    
+    // Import necessary modules
+    const { db } = await import('./db-postgres');
+    const { comparePasswords } = await import('./utils/password');
+    const { sql } = await import('drizzle-orm');
+    
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Username and password are required' 
+      });
+    }
+    
+    // Get user from database
+    const users = await db.execute(
+      sql`SELECT * FROM users WHERE username = ${username}`
+    );
+    
+    if (!users || users.length === 0) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid username or password' 
+      });
+    }
+    
+    const user = users[0];
+    
+    // Check password (with proper type casting)
+    const passwordMatch = await comparePasswords(password, user.password as string);
+    
+    if (!passwordMatch) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid username or password' 
+      });
+    }
+    
+    // Create a session manually
+    if (req.session) {
+      // Store user info in session (don't include password) with type casting
+      req.session.user = {
+        id: Number(user.id),
+        username: String(user.username),
+        name: String(user.name),
+        role: String(user.role),
+        department: String(user.department)
+      };
+      
+      console.log('Session created:', req.sessionID);
+      
+      // Return success
+      return res.status(200).json({
+        success: true,
+        message: 'Login successful',
+        user: {
+          id: Number(user.id),
+          username: String(user.username),
+          name: String(user.name),
+          role: String(user.role),
+          department: String(user.department)
+        }
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create session'
+      });
+    }
+  } catch (err) {
+    const error = err as Error;
+    console.error('Direct login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Login failed',
+      error: error.message
+    });
+  }
+});
+
+// Direct endpoint to check user session
+app.get("/api/direct-user", (req, res) => {
+  console.log('Direct user check');
+  console.log('Session ID:', req.sessionID);
+  console.log('Session data:', req.session);
+  
+  if (req.session && req.session.user) {
+    return res.status(200).json({
+      success: true,
+      user: req.session.user
+    });
+  } else {
+    return res.status(401).json({
+      success: false,
+      message: 'Not authenticated'
     });
   }
 });
