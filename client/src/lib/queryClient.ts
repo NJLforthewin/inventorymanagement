@@ -6,14 +6,22 @@ const API_URL = import.meta.env.PROD
   ? "https://stockwell.onrender.com/api"
   : "/api";
 
-// Configure axios defaults for all requests
-axios.defaults.withCredentials = true;
-axios.defaults.headers.common['Content-Type'] = 'application/json';
+console.log('API URL configured as:', API_URL);
+
+// Create dedicated API client
+const apiClient = axios.create({
+  baseURL: API_URL,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
 
 // Add axios interceptors for debugging
-axios.interceptors.request.use(
+apiClient.interceptors.request.use(
   config => {
     console.log(`Request: ${config.method?.toUpperCase()} ${config.url}`);
+    console.log('Request headers:', config.headers);
     return config;
   },
   error => {
@@ -22,7 +30,7 @@ axios.interceptors.request.use(
   }
 );
 
-axios.interceptors.response.use(
+apiClient.interceptors.response.use(
   response => {
     console.log(`Response: ${response.status} ${response.config.url}`);
     return response;
@@ -33,24 +41,9 @@ axios.interceptors.response.use(
     } else {
       console.error('Response error:', error.message);
     }
-    
-    // Special handling for 401 errors (unauthorized)
-    if (error.response && error.response.status === 401) {
-      console.log('Authentication error - user not logged in');
-    }
-    
     return Promise.reject(error);
   }
 );
-
-// Create dedicated API client
-const apiClient = axios.create({
-  baseURL: API_URL,
-  withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
 
 // Helper to prefix API paths
 function getFullUrl(path: string): string {
@@ -95,7 +88,6 @@ export async function apiRequest(
     credentials: "include",
   });
 
-  // For debugging
   console.log(`Response status: ${res.status} ${res.statusText}`);
   
   await throwIfResNotOk(res);
@@ -109,7 +101,6 @@ export const getQueryFn: <T>(options: {
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
     try {
-      // Use the getFullUrl helper to ensure the URL is properly prefixed
       const fullUrl = getFullUrl(queryKey[0] as string);
       console.log(`Query: Fetching ${fullUrl}`);
       

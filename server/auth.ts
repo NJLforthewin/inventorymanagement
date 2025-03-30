@@ -24,18 +24,27 @@ declare global {
 }
 
 export function setupAuth(app: Express) {
+  // CRITICAL: Force secure cookies in production
+  const isProduction = process.env.NODE_ENV === 'production';
+  console.log(`Environment: ${isProduction ? 'Production' : 'Development'}`);
+  
   const sessionSettings: session.SessionOptions = {
     secret: process.env.SESSION_SECRET || 'hospital-inventory-secret-key',
     resave: false,
     saveUninitialized: false,
     store: storage.sessionStore,
     cookie: {
-      secure: true, // Always use secure cookies for cross-origin
-      sameSite: 'none', // Required for cross-origin cookies
-      maxAge: 24 * 60 * 60 * 1000
+      // For cross-origin requests between Netlify and Render:
+      secure: true,
+      sameSite: 'none',
+      maxAge: 24 * 60 * 60 * 1000,
+      path: '/'
     }
   };
   
+  console.log('Session cookie settings:', sessionSettings.cookie);
+  
+  // Trust the first proxy (required for secure cookies in production)
   app.set("trust proxy", 1);
   app.use(session(sessionSettings));
   app.use(passport.initialize());
@@ -91,8 +100,23 @@ export function setupAuth(app: Express) {
     }
   });
 
+  // Add a route to check session
+  app.get("/api/session-check", (req, res) => {
+    console.log("Session check request received");
+    console.log("Session ID:", req.sessionID);
+    console.log("Is authenticated:", req.isAuthenticated());
+    
+    res.json({
+      authenticated: req.isAuthenticated(),
+      sessionID: req.sessionID,
+      user: req.isAuthenticated() ? req.user!.username : null
+    });
+  });
+
   app.post("/api/register", async (req, res, next) => {
     try {
+      console.log('Register attempt:', req.body.username);
+      
       const existingUser = await storage.getUserByUsername(req.body.username);
       if (existingUser) {
         return res.status(400).json({ message: "Username already exists" });
@@ -141,6 +165,7 @@ export function setupAuth(app: Express) {
         }
         
         console.log('User logged in successfully:', user.username);
+        console.log('Session ID:', req.sessionID);
         
         // Don't send the password to the client
         const { password, ...userWithoutPassword } = user;
@@ -150,6 +175,7 @@ export function setupAuth(app: Express) {
   });
 
   app.post("/api/logout", (req, res, next) => {
+    console.log('Logout attempt');
     req.logout((err: any) => {
       if (err) return next(err);
       res.sendStatus(200);
@@ -157,6 +183,10 @@ export function setupAuth(app: Express) {
   });
 
   app.get("/api/user", (req, res) => {
+    console.log('User data requested');
+    console.log('Is authenticated:', req.isAuthenticated());
+    console.log('Session ID:', req.sessionID);
+    
     if (!req.isAuthenticated()) {
       console.log('Unauthorized access attempt to /api/user');
       return res.status(401).json({ message: "Unauthorized" });

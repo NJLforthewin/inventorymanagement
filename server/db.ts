@@ -43,6 +43,18 @@ export async function testSqlConnection() {
   }
 }
 
+// Add this function to db.ts
+export async function initDb() {
+  try {
+    await connectToDb();
+    console.log('Database initialized successfully');
+    return true;
+  } catch (error) {
+    console.error('Failed to initialize database:', error);
+    return false;
+  }
+}
+
 // For use with Drizzle ORM
 export const client = new Client({
 

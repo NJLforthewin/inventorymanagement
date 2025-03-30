@@ -3,7 +3,7 @@ import { registerRoutes } from "./routes";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
-import { initDb } from './db-postgres';  // Make sure this path matches where you saved the db.ts file
+import { initDb } from './db-postgres';  // Correct import
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,19 +21,38 @@ function log(message: string, source = "express") {
 
 const app = express();
 
-// CORS middleware
+// Set trust proxy
+app.set("trust proxy", 1);
+
+// CORS middleware with expanded configuration
 app.use(cors({
-  origin: ["https://stockwells.netlify.app", "http://localhost:3000", "http://localhost:5000"],
-  credentials: true
+  origin: [
+    "https://stockwells.netlify.app", 
+    "http://localhost:3000", 
+    "http://localhost:5000", 
+    "http://localhost:5173"
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// Logging middleware
+// Logging middleware with enhanced debugging
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
+  
+  // Log request headers for debugging
+  console.log(`${new Date().toISOString()} Request: ${req.method} ${req.path}`);
+  console.log('Request headers:', {
+    origin: req.headers.origin,
+    referer: req.headers.referer,
+    cookie: req.headers.cookie ? '[PRESENT]' : '[ABSENT]'
+  });
+  
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
   const originalResJson = res.json;
@@ -42,19 +61,29 @@ app.use((req, res, next) => {
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
 
+  // Ensure CORS headers are set correctly
+  res.header('Access-Control-Allow-Credentials', 'true');
+  if (req.headers.origin) {
+    res.header('Access-Control-Allow-Origin', req.headers.origin);
+  }
+
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
+        const respStr = JSON.stringify(capturedJsonResponse);
+        logLine += ` :: ${respStr.length > 100 ? respStr.slice(0, 100) + '...' : respStr}`;
       }
 
       log(logLine);
+      
+      // Log response headers for debugging
+      console.log('Response headers:', {
+        'set-cookie': res.getHeader('set-cookie') ? '[PRESENT]' : '[ABSENT]',
+        'access-control-allow-origin': res.getHeader('access-control-allow-origin'),
+        'access-control-allow-credentials': res.getHeader('access-control-allow-credentials')
+      });
     }
   });
 
@@ -66,6 +95,15 @@ app.use((req, res, next) => {
   await initDb();
   
   const server = await registerRoutes(app);
+
+  // Add health check endpoint
+  app.get("/health", (req, res) => {
+    res.status(200).json({ 
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      env: process.env.NODE_ENV || 'development'
+    });
+  });
 
   // Error handling middleware
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -85,6 +123,7 @@ app.use((req, res, next) => {
     res.status(200).json({ 
       message: "Stock Well API Server", 
       status: "running",
+      environment: process.env.NODE_ENV || 'development',
       frontend: "https://stockwells.netlify.app"
     });
   });
@@ -95,5 +134,8 @@ app.use((req, res, next) => {
     host: "0.0.0.0",
   }, () => {
     log(`API server running on port ${port} with PostgreSQL database`);
+    log(`NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+    log(`Database URL: ${process.env.DATABASE_URL ? 'Configured' : 'Not configured'}`);
+    log(`Session Secret: ${process.env.SESSION_SECRET ? 'Configured' : 'Using default'}`);
   });
 })();
