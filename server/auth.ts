@@ -30,11 +30,12 @@ export function setupAuth(app: Express) {
     saveUninitialized: false,
     store: storage.sessionStore,
     cookie: {
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: true, // Always use secure cookies for cross-origin
+      sameSite: 'none', // Required for cross-origin cookies
       maxAge: 24 * 60 * 60 * 1000
     }
   };
+  
   app.set("trust proxy", 1);
   app.use(session(sessionSettings));
   app.use(passport.initialize());
@@ -43,27 +44,49 @@ export function setupAuth(app: Express) {
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
+        console.log(`Attempting to authenticate user: ${username}`);
         const user = await storage.getUserByUsername(username);
-        if (!user || !(await comparePasswords(password, user.password))) {
+        
+        if (!user) {
+          console.log(`User not found: ${username}`);
+          return done(null, false, { message: "Invalid username or password" });
+        }
+        
+        const passwordMatch = await comparePasswords(password, user.password);
+        if (!passwordMatch) {
+          console.log(`Invalid password for user: ${username}`);
           return done(null, false, { message: "Invalid username or password" });
         }
         
         // Update last login time
         await storage.updateUserLastLogin(user.id);
+        console.log(`User authenticated successfully: ${username}`);
         
         return done(null, user);
       } catch (error) {
+        console.error('Authentication error:', error);
         return done(error);
       }
     }),
   );
 
-  passport.serializeUser((user: Express.User, done) => done(null, user.id));
+  passport.serializeUser((user: Express.User, done) => {
+    console.log(`Serializing user: ${user.username} (ID: ${user.id})`);
+    done(null, user.id);
+  });
+  
   passport.deserializeUser(async (id: number, done) => {
     try {
+      console.log(`Deserializing user ID: ${id}`);
       const user = await storage.getUser(id);
+      if (!user) {
+        console.log(`User not found for ID: ${id}`);
+        return done(null, false);
+      }
+      console.log(`User deserialized: ${user.username}`);
       done(null, user);
     } catch (err) {
+      console.error('Deserialization error:', err);
       done(err);
     }
   });
@@ -134,8 +157,12 @@ export function setupAuth(app: Express) {
   });
 
   app.get("/api/user", (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+    if (!req.isAuthenticated()) {
+      console.log('Unauthorized access attempt to /api/user');
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     
+    console.log(`User data requested for: ${req.user!.username}`);
     // Don't send the password to the client
     const { password, ...userWithoutPassword } = req.user!;
     res.json(userWithoutPassword);
@@ -147,6 +174,7 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
   if (req.isAuthenticated()) {
     return next();
   }
+  console.log('Unauthorized access attempt');
   res.status(401).json({ message: "Unauthorized" });
 }
 
@@ -155,5 +183,6 @@ export function isAdmin(req: Request, res: Response, next: NextFunction) {
   if (req.isAuthenticated() && req.user!.role === 'admin') {
     return next();
   }
+  console.log('Forbidden access attempt - admin required');
   res.status(403).json({ message: "Forbidden - Admin access required" });
 }

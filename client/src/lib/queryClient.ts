@@ -1,11 +1,56 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import axios from 'axios';
 
-axios.defaults.withCredentials = true; 
-// Add this API_URL constant at the top of the file
+// Define API URL based on environment
 const API_URL = import.meta.env.PROD 
   ? "https://stockwell.onrender.com/api"
   : "/api";
+
+// Configure axios defaults for all requests
+axios.defaults.withCredentials = true;
+axios.defaults.headers.common['Content-Type'] = 'application/json';
+
+// Add axios interceptors for debugging
+axios.interceptors.request.use(
+  config => {
+    console.log(`Request: ${config.method?.toUpperCase()} ${config.url}`);
+    return config;
+  },
+  error => {
+    console.error('Request error:', error);
+    return Promise.reject(error);
+  }
+);
+
+axios.interceptors.response.use(
+  response => {
+    console.log(`Response: ${response.status} ${response.config.url}`);
+    return response;
+  },
+  error => {
+    if (error.response) {
+      console.error(`Response error ${error.response.status}: ${error.response.data?.message || error.message}`);
+    } else {
+      console.error('Response error:', error.message);
+    }
+    
+    // Special handling for 401 errors (unauthorized)
+    if (error.response && error.response.status === 401) {
+      console.log('Authentication error - user not logged in');
+    }
+    
+    return Promise.reject(error);
+  }
+);
+
+// Create dedicated API client
+const apiClient = axios.create({
+  baseURL: API_URL,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
 
 // Helper to prefix API paths
 function getFullUrl(path: string): string {
@@ -28,6 +73,7 @@ function getFullUrl(path: string): string {
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    console.error(`API Error: ${res.status} - ${text}`);
     throw new Error(`${res.status}: ${text}`);
   }
 }
@@ -40,6 +86,8 @@ export async function apiRequest(
   // Use the getFullUrl helper to ensure the URL is properly prefixed
   const fullUrl = getFullUrl(url);
   
+  console.log(`Making ${method} request to ${fullUrl}`);
+  
   const res = await fetch(fullUrl, {
     method,
     headers: data ? { "Content-Type": "application/json" } : {},
@@ -47,17 +95,12 @@ export async function apiRequest(
     credentials: "include",
   });
 
+  // For debugging
+  console.log(`Response status: ${res.status} ${res.statusText}`);
+  
   await throwIfResNotOk(res);
   return res;
 }
-
-const apiClient = axios.create({
-  baseURL: API_URL,
-  withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
 
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
@@ -65,19 +108,28 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Use the getFullUrl helper to ensure the URL is properly prefixed
-    const fullUrl = getFullUrl(queryKey[0] as string);
-    
-    const res = await fetch(fullUrl, {
-      credentials: "include",
-    });
+    try {
+      // Use the getFullUrl helper to ensure the URL is properly prefixed
+      const fullUrl = getFullUrl(queryKey[0] as string);
+      console.log(`Query: Fetching ${fullUrl}`);
+      
+      const res = await fetch(fullUrl, {
+        credentials: "include",
+      });
 
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+      console.log(`Query response: ${res.status} ${res.statusText}`);
+      
+      if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+        console.log("Unauthorized request - returning null as configured");
+        return null;
+      }
+
+      await throwIfResNotOk(res);
+      return await res.json();
+    } catch (error) {
+      console.error("Query error:", error);
+      throw error;
     }
-
-    await throwIfResNotOk(res);
-    return await res.json();
   };
 
 export const queryClient = new QueryClient({
@@ -94,3 +146,6 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+// Export the API client for direct usage
+export { apiClient };
