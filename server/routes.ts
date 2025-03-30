@@ -263,6 +263,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
+  app.get("/api/debug/check-admin", async (req, res) => {
+    try {
+      const user = await storage.getUserByUsername('admin');
+      
+      res.status(200).json({
+        userExists: !!user,
+        username: user ? user.username : null,
+        role: user ? user.role : null,
+      });
+    } catch (error: any) {
+      console.error('Admin check error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+  
+  app.post("/api/debug/recreate-admin", async (req, res) => {
+    try {
+      // Import password utils
+      const { hashPassword } = await import('./utils/password');
+      
+      // First check if user exists
+      const existingUser = await storage.getUserByUsername('admin');
+      
+      if (existingUser) {
+        // Update admin password
+        const adminPassword = await hashPassword('admin123');
+        
+        // Use SQL to update
+        await db.execute(sql`
+          UPDATE users 
+          SET password = ${adminPassword} 
+          WHERE username = 'admin'
+        `);
+        
+        console.log('Admin password updated');
+      } else {
+        // Create admin user
+        const adminPassword = await hashPassword('admin123');
+        
+        // Use SQL to insert
+        await db.execute(sql`
+          INSERT INTO users (name, username, email, password, role, department, active, created_at)
+          VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
+        `);
+        
+        console.log('Admin user created');
+      }
+      
+      // Verify the user exists now
+      const user = await storage.getUserByUsername('admin');
+      
+      res.status(200).json({
+        success: true,
+        userExists: !!user
+      });
+    } catch (error: any) {
+      console.error('Create admin error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+
   app.get("/api/debug/check-tables", async (req, res) => {
     try {
       // Try to query if tables exist
