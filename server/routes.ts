@@ -9,10 +9,14 @@ import {
   insertInventoryItemSchema,
   updateInventoryItemSchema,
   insertAuditLogSchema,
-  insertUserSchema
+  insertUserSchema,
+  users,
+  departments,
+  categories
 } from "@shared/schema";
 import { ZodError, z } from "zod";
 import { fromZodError } from "zod-validation-error";
+import { db } from './db-postgres';  // Add this import
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Debug endpoint to check database status
@@ -80,6 +84,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Add a basic seeding endpoint that doesn't rely on the storage implementation
+  app.post("/api/debug/manual-seed", async (req, res) => {
+    try {
+      console.log('Manual seeding initiated...');
+      
+      // Import the hashPassword function
+      const { hashPassword } = await import('./utils/password');
+      
+      // Create admin user using direct DB queries
+      const adminPassword = await hashPassword('admin123');
+      const staffPassword = await hashPassword('staff123');
+      
+      // Insert users
+      await db.insert(users).values({
+        name: "Admin User",
+        username: "admin",
+        email: "admin@hospital.org",
+        password: adminPassword,
+        role: "admin",
+        department: "Administration",
+        active: true,
+        createdAt: new Date()
+      }).onConflictDoNothing();
+      
+      await db.insert(users).values({
+        name: "Staff User",
+        username: "staff",
+        email: "staff@hospital.org",
+        password: staffPassword,
+        role: "staff",
+        department: "Emergency",
+        active: true,
+        createdAt: new Date()
+      }).onConflictDoNothing();
+      
+      // Insert departments
+      await db.insert(departments).values([
+        { name: "Emergency", description: "Emergency department", createdAt: new Date() },
+        { name: "Surgery", description: "Surgery department", createdAt: new Date() },
+        { name: "Pediatrics", description: "Pediatrics department", createdAt: new Date() },
+        { name: "Cardiology", description: "Cardiology department", createdAt: new Date() },
+        { name: "General", description: "General department", createdAt: new Date() }
+      ]).onConflictDoNothing();
+      
+      // Insert categories
+      await db.insert(categories).values([
+        { name: "PPE", description: "Personal Protective Equipment", createdAt: new Date() },
+        { name: "Pharmaceuticals", description: "Medicines and drugs", createdAt: new Date() },
+        { name: "Equipment", description: "Medical equipment", createdAt: new Date() },
+        { name: "Supplies", description: "General medical supplies", createdAt: new Date() }
+      ]).onConflictDoNothing();
+      
+      // Check if it worked
+      const usersResult = await db.select().from(users);
+      const departmentsResult = await db.select().from(departments);
+      
+      res.status(200).json({
+        success: true,
+        usersCount: usersResult.length,
+        departmentsCount: departmentsResult.length
+      });
+    } catch (error: any) {
+      console.error('Manual seed error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+
   // Setup authentication
   setupAuth(app);
 
@@ -95,15 +169,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     next(err);
   };
 
-  // Log requests to /api routes
+
   app.use('/api', (req, res, next) => {
     console.log(`${req.method} ${req.path}`);
     next();
   });
 
-  // API routes
   
-  // Dashboard stats
   app.get("/api/dashboard/stats", isAuthenticated, async (req, res, next) => {
     try {
       const stats = await storage.getDashboardStats();
@@ -132,7 +204,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Department routes
   app.get("/api/departments", isAuthenticated, async (req, res, next) => {
     try {
       const departments = await storage.getDepartments();
@@ -162,7 +233,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertDepartmentSchema.parse(req.body);
       const department = await storage.createDepartment(validatedData);
       
-      // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "created",
@@ -186,7 +256,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Department not found" });
       }
       
-      // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "updated",
@@ -211,7 +280,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const deleted = await storage.deleteDepartment(id);
       
       if (deleted) {
-        // Create audit log
         await storage.createAuditLog({
           userId: req.user!.id,
           activityType: "deleted",
@@ -225,7 +293,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Category routes
   app.get("/api/categories", isAuthenticated, async (req, res, next) => {
     try {
       const categories = await storage.getCategories();
@@ -255,7 +322,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const validatedData = insertCategorySchema.parse(req.body);
       const category = await storage.createCategory(validatedData);
       
-      // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "created",
