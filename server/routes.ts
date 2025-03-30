@@ -14,6 +14,7 @@ import {
   departments,
   categories
 } from "@shared/schema";
+import { sql } from "drizzle-orm";
 import { ZodError, z } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { db } from './db-postgres';  // Add this import
@@ -54,26 +55,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Force seeding database...');
       
-      // Check if storage is DatabaseStorage with seedInitialData method
-      if ('seedInitialData' in storage) {
-        await (storage as any).seedInitialData();
-        console.log('Seeding completed');
-      } else {
-        console.log('Storage does not have seedInitialData method');
-        return res.status(400).json({
-          success: false,
-          error: "Storage implementation does not support direct seeding"
-        });
-      }
+      // Import necessary functions
+      const { hashPassword } = await import('./utils/password');
+      
+      // Create admin user
+      const adminPassword = await hashPassword('admin123');
+      const staffPassword = await hashPassword('staff123');
+      
+      // Use direct SQL approach with db.execute
+      
+      // Insert users
+      await db.execute(sql`
+        INSERT INTO users (name, username, email, password, role, department, active, created_at)
+        VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
+        ON CONFLICT (username) DO NOTHING
+      `);
+      
+      await db.execute(sql`
+        INSERT INTO users (name, username, email, password, role, department, active, created_at)
+        VALUES ('Staff User', 'staff', 'staff@hospital.org', ${staffPassword}, 'staff', 'Emergency', true, NOW())
+        ON CONFLICT (username) DO NOTHING
+      `);
+      
+      // Insert departments
+      await db.execute(sql`
+        INSERT INTO departments (name, description, created_at)
+        VALUES 
+          ('Emergency', 'Emergency department', NOW()),
+          ('Surgery', 'Surgery department', NOW()),
+          ('Pediatrics', 'Pediatrics department', NOW()),
+          ('Cardiology', 'Cardiology department', NOW()),
+          ('General', 'General department', NOW())
+        ON CONFLICT (name) DO NOTHING
+      `);
+      
+      // Insert categories
+      await db.execute(sql`
+        INSERT INTO categories (name, description, created_at)
+        VALUES 
+          ('PPE', 'Personal Protective Equipment', NOW()),
+          ('Pharmaceuticals', 'Medicines and drugs', NOW()),
+          ('Equipment', 'Medical equipment', NOW()),
+          ('Supplies', 'General medical supplies', NOW())
+        ON CONFLICT (name) DO NOTHING
+      `);
       
       // Check if it worked
-      const { users, total } = await storage.getUsers(1, 10);
-      const departments = await storage.getDepartments();
+      const usersResult = await db.select({ count: sql`count(*)` }).from(users);
+      const departmentsResult = await db.select({ count: sql`count(*)` }).from(departments);
       
       res.status(200).json({
         success: true,
-        usersCount: total,
-        departmentsCount: departments.length
+        usersCount: Number(usersResult[0]?.count || 0),
+        departmentsCount: Number(departmentsResult[0]?.count || 0)
       });
     } catch (error: any) {
       console.error('Force seed error:', error);
@@ -92,58 +126,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Import the hashPassword function
       const { hashPassword } = await import('./utils/password');
       
-      // Create admin user using direct DB queries
+      // Create admin user
       const adminPassword = await hashPassword('admin123');
       const staffPassword = await hashPassword('staff123');
       
-      // Insert users
-      await db.insert(users).values({
-        name: "Admin User",
-        username: "admin",
-        email: "admin@hospital.org",
-        password: adminPassword,
-        role: "admin",
-        department: "Administration",
-        active: true,
-        createdAt: new Date()
-      }).onConflictDoNothing();
+      // Use db.execute with sql`` instead of db.insert
+      await db.execute(sql`
+        INSERT INTO users (name, username, email, password, role, department, active, created_at)
+        VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
+        ON CONFLICT (username) DO NOTHING
+      `);
       
-      await db.insert(users).values({
-        name: "Staff User",
-        username: "staff",
-        email: "staff@hospital.org",
-        password: staffPassword,
-        role: "staff",
-        department: "Emergency",
-        active: true,
-        createdAt: new Date()
-      }).onConflictDoNothing();
+      await db.execute(sql`
+        INSERT INTO users (name, username, email, password, role, department, active, created_at)
+        VALUES ('Staff User', 'staff', 'staff@hospital.org', ${staffPassword}, 'staff', 'Emergency', true, NOW())
+        ON CONFLICT (username) DO NOTHING
+      `);
       
       // Insert departments
-      await db.insert(departments).values([
-        { name: "Emergency", description: "Emergency department", createdAt: new Date() },
-        { name: "Surgery", description: "Surgery department", createdAt: new Date() },
-        { name: "Pediatrics", description: "Pediatrics department", createdAt: new Date() },
-        { name: "Cardiology", description: "Cardiology department", createdAt: new Date() },
-        { name: "General", description: "General department", createdAt: new Date() }
-      ]).onConflictDoNothing();
+      await db.execute(sql`
+        INSERT INTO departments (name, description, created_at)
+        VALUES 
+          ('Emergency', 'Emergency department', NOW()),
+          ('Surgery', 'Surgery department', NOW()),
+          ('Pediatrics', 'Pediatrics department', NOW()),
+          ('Cardiology', 'Cardiology department', NOW()),
+          ('General', 'General department', NOW())
+        ON CONFLICT (name) DO NOTHING
+      `);
       
       // Insert categories
-      await db.insert(categories).values([
-        { name: "PPE", description: "Personal Protective Equipment", createdAt: new Date() },
-        { name: "Pharmaceuticals", description: "Medicines and drugs", createdAt: new Date() },
-        { name: "Equipment", description: "Medical equipment", createdAt: new Date() },
-        { name: "Supplies", description: "General medical supplies", createdAt: new Date() }
-      ]).onConflictDoNothing();
+      await db.execute(sql`
+        INSERT INTO categories (name, description, created_at)
+        VALUES 
+          ('PPE', 'Personal Protective Equipment', NOW()),
+          ('Pharmaceuticals', 'Medicines and drugs', NOW()),
+          ('Equipment', 'Medical equipment', NOW()),
+          ('Supplies', 'General medical supplies', NOW())
+        ON CONFLICT (name) DO NOTHING
+      `);
       
-      // Check if it worked
-      const usersResult = await db.select().from(users);
-      const departmentsResult = await db.select().from(departments);
+      // Check if it worked using sql count
+      const usersResult = await db.select({ count: sql`count(*)` }).from(users);
+      const departmentsResult = await db.select({ count: sql`count(*)` }).from(departments);
       
       res.status(200).json({
         success: true,
-        usersCount: usersResult.length,
-        departmentsCount: departmentsResult.length
+        usersCount: Number(usersResult[0]?.count || 0),
+        departmentsCount: Number(departmentsResult[0]?.count || 0)
       });
     } catch (error: any) {
       console.error('Manual seed error:', error);

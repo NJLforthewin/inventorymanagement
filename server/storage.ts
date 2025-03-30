@@ -8,7 +8,7 @@ import { eq, and, like, gte, lte, desc, inArray } from "drizzle-orm";
 import { db, executeSqlQuery } from "./db";
 import session from "express-session";
 import createMemoryStore from "memorystore";
-import * as mssql from 'mssql';
+import { sql } from "drizzle-orm";
 import connectPg from "connect-pg-simple";
 
 const MemoryStore = createMemoryStore(session);
@@ -353,8 +353,8 @@ export class DatabaseStorage implements IStorage {
         .limit(limit)
         .offset(offset);
       
-      const [{ count }] = await db
-        .select({ count: db.fn.count() })
+        const [{ count }] = await db
+        .select({ count: sql`count(*)` })
         .from(users);
         
       return {
@@ -552,7 +552,8 @@ export class DatabaseStorage implements IStorage {
       const items = await filteredQuery.limit(limit).offset(offset);
       
       // Build count query with same filters
-      let countQuery = db.select({ count: db.fn.count() }).from(inventoryItems);
+      let countQuery = db.select({ count: sql`count(*)` }).from(inventoryItems);
+
       const filteredCountQuery = applyFilters(countQuery);
       
       const [{ count }] = await filteredCountQuery;
@@ -733,71 +734,71 @@ export class DatabaseStorage implements IStorage {
         return filteredQuery;
       };
       
-      // Apply filters to the main query
-      const filteredQuery = applyFilters(baseQuery);
-      const logs = await filteredQuery.limit(limit).offset(offset);
-      
-      // Build count query with same filters
-      let countQuery = db.select({ count: db.fn.count() }).from(auditLogs);
-      const filteredCountQuery = applyFilters(countQuery);
-      
-      const [{ count }] = await filteredCountQuery;
-      
-      return {
-        logs,
-        total: Number(count)
-      };
-    } catch (error) {
-      console.error("Error getting audit logs:", error);
-      throw error;
-    }
+// Apply filters to the main query
+const filteredQuery = applyFilters(baseQuery);
+const logs = await filteredQuery.limit(limit).offset(offset);
+
+// Build count query with same filters
+let countQuery = db.select({ count: sql`count(*)` }).from(auditLogs);
+const filteredCountQuery = applyFilters(countQuery);
+
+const [{ count }] = await filteredCountQuery;
+
+return {
+  logs,
+  total: Number(count)
+};
+} catch (error) {
+  console.error("Error getting audit logs:", error);
+  throw error;
+}
+}
+
+// Dashboard statistics
+async getDashboardStats(): Promise<{
+  totalItems: number;
+  lowStockCount: number;
+  recentlyAdded: number;
+  outOfStock: number;
+}> {
+  try {
+    // Get total items count
+    const [{ count: totalItems }] = await db
+      .select({ count: sql`count(*)` })
+      .from(inventoryItems);
+    
+    // Get low stock count
+    const [{ count: lowStockCount }] = await db
+      .select({ count: sql`count(*)` })
+      .from(inventoryItems)
+      .where(eq(inventoryItems.status, 'low_stock'));
+    
+    // Get out of stock count
+    const [{ count: outOfStock }] = await db
+      .select({ count: sql`count(*)` })
+      .from(inventoryItems)
+      .where(eq(inventoryItems.status, 'out_of_stock'));
+    
+    // Get recently added count (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const [{ count: recentlyAdded }] = await db
+      .select({ count: sql`count(*)` })
+      .from(inventoryItems)
+      .where(gte(inventoryItems.createdAt, thirtyDaysAgo));
+    
+    return {
+      totalItems: Number(totalItems),
+      lowStockCount: Number(lowStockCount),
+      recentlyAdded: Number(recentlyAdded),
+      outOfStock: Number(outOfStock)
+    };
+  } catch (error) {
+    console.error("Error getting dashboard stats:", error);
+    throw error;
   }
-  
-  // Dashboard statistics
-  async getDashboardStats(): Promise<{
-    totalItems: number;
-    lowStockCount: number;
-    recentlyAdded: number;
-    outOfStock: number;
-  }> {
-    try {
-      // Get total items count
-      const [{ count: totalItems }] = await db
-        .select({ count: db.fn.count() })
-        .from(inventoryItems);
-      
-      // Get low stock count
-      const [{ count: lowStockCount }] = await db
-        .select({ count: db.fn.count() })
-        .from(inventoryItems)
-        .where(eq(inventoryItems.status, 'low_stock'));
-      
-      // Get out of stock count
-      const [{ count: outOfStock }] = await db
-        .select({ count: db.fn.count() })
-        .from(inventoryItems)
-        .where(eq(inventoryItems.status, 'out_of_stock'));
-      
-      // Get recently added count (last 30 days)
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      
-      const [{ count: recentlyAdded }] = await db
-        .select({ count: db.fn.count() })
-        .from(inventoryItems)
-        .where(gte(inventoryItems.createdAt, thirtyDaysAgo));
-      
-      return {
-        totalItems: Number(totalItems),
-        lowStockCount: Number(lowStockCount),
-        recentlyAdded: Number(recentlyAdded),
-        outOfStock: Number(outOfStock)
-      };
-    } catch (error) {
-      console.error("Error getting dashboard stats:", error);
-      throw error;
-    }
-  }
+}
   
   // Recent activity
   async getRecentActivity(limit = 5): Promise<AuditLog[]> {
@@ -844,6 +845,7 @@ export class MemStorage implements IStorage {
     
     // Seed some initial data
     setTimeout(() => {
+
     }, 0);
   }
 
