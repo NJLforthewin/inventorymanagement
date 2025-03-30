@@ -91,52 +91,69 @@ app.use((req, res, next) => {
   next();
 });
 
+// Add health check endpoint FIRST so it's available immediately
+app.get("/health", (req, res) => {
+  res.status(200).json({ 
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV || 'development'
+  });
+});
+
+// Start the server FIRST, before database connection
+const port = parseInt(process.env.PORT || "5000", 10);
+const httpServer = app.listen(port, "0.0.0.0", () => {
+  log(`API server started on port ${port}. Now connecting to database...`);
+});
+
+// THEN connect to database and register routes
 (async () => {
-  // Initialize database
-  await initDb();
-  
-  const server = await registerRoutes(app);
-
-  // Add health check endpoint
-  app.get("/health", (req, res) => {
-    res.status(200).json({ 
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      env: process.env.NODE_ENV || 'development'
-    });
-  });
-
-  // Error handling middleware
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    res.status(status).json({ message });
-    console.error(`Error [${status}]:`, err);
-  });
-
-  // API-only server - no static file serving in production
-  app.use("*", (req, res) => {
-    if (req.originalUrl.startsWith("/api")) {
-      return res.status(404).json({ message: "API endpoint not found" });
+  try {
+    // Initialize database with a timeout
+    const dbConnectPromise = initDb();
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error("Database connection timeout")), 15000)
+    );
+    
+    try {
+      await Promise.race([dbConnectPromise, timeoutPromise]);
+      log('Database connected successfully');
+    } catch (err) {
+      const error = err as Error;
+      log(`WARNING: ${error.message}. Server will continue running with limited functionality.`);
     }
     
-    res.status(200).json({ 
-      message: "Stock Well API Server", 
-      status: "running",
-      environment: process.env.NODE_ENV || 'development',
-      frontend: "https://stockwell.netlify.app"
-    });
-  });
+    // Register routes AFTER server is listening
+    await registerRoutes(app);
 
-  const port = process.env.PORT || 5000;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-  }, () => {
-    log(`API server running on port ${port} with PostgreSQL database`);
+    // Error handling middleware
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
+
+      res.status(status).json({ message });
+      console.error(`Error [${status}]:`, err);
+    });
+
+    // API-only server - no static file serving in production
+    app.use("*", (req, res) => {
+      if (req.originalUrl.startsWith("/api")) {
+        return res.status(404).json({ message: "API endpoint not found" });
+      }
+      
+      res.status(200).json({ 
+        message: "Stock Well API Server", 
+        status: "running",
+        environment: process.env.NODE_ENV || 'development',
+        frontend: "https://stockwell.netlify.app"
+      });
+    });
+
+    log(`API server fully initialized with routes`);
     log(`NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
     log(`Database URL: ${process.env.DATABASE_URL ? 'Configured' : 'Not configured'}`);
     log(`Session Secret: ${process.env.SESSION_SECRET ? 'Configured' : 'Using default'}`);
-  });
+  } catch (error) {
+    console.error('Server initialization error:', error);
+  }
 })();
