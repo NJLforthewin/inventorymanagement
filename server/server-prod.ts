@@ -120,6 +120,36 @@ app.get("/api/debug/db-connection", (req, res) => {
   });
 });
 
+// Add debug endpoint to test database connection directly
+app.get("/api/debug/db-test", async (req, res) => {
+  try {
+    // Import the db module
+    const { db } = await import('./db-postgres');
+    
+    // Use initDb directly
+    const dbInitResult = await import('./db-postgres').then(module => module.initDb());
+    
+    res.json({
+      success: true,
+      message: "Database connection successful",
+      init_result: dbInitResult,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    // Cast the unknown error to Error type
+    const error = err as Error & { code?: string };
+    
+    res.status(500).json({
+      success: false,
+      message: "Database connection failed",
+      error: error.message,
+      code: error.code,
+      stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 // THEN connect to database and register routes
 (async () => {
   try {

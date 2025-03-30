@@ -1,64 +1,66 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import * as schema from '../shared/schema';  // Note the path change
+import * as schema from '../shared/schema';
 
-// Set default connection string for development if not provided
+// Log database connection attempt
+console.log('Initializing database connection...');
+
+// Make sure DATABASE_URL is set
 if (!process.env.DATABASE_URL) {
-  console.warn('DATABASE_URL not set, using default local connection');
-  process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/stockwell';
+  console.error('ERROR: DATABASE_URL environment variable is not set');
+  process.exit(1);
 }
 
-// Use environment variables for connection
-const connectionString = process.env.DATABASE_URL;
+// Clean up the connection string if needed
+let connectionString = process.env.DATABASE_URL;
 
-// Create postgres client with improved SSL configuration for Render
+// Add SSL parameters if not present
+if (!connectionString.includes('sslmode=') && !connectionString.includes('?ssl=')) {
+  connectionString += connectionString.includes('?') 
+    ? '&sslmode=require' 
+    : '?sslmode=require';
+}
+
+console.log('Using connection string (masked):', 
+  connectionString.replace(/:[^:@]+@/, ':***@'));
+
+// Create postgres client with special handling for Render
 const client = postgres(connectionString, { 
   max: 3,
   ssl: {
-    rejectUnauthorized: false  // Important for connecting to Render PostgreSQL
+    rejectUnauthorized: false
   },
   idle_timeout: 30,
-  connect_timeout: 30,  // Increased timeout for initial connection
-  debug: true  // Enable debug logging for connection issues
+  connect_timeout: 30,
+  debug: process.env.NODE_ENV !== 'production' // Only in dev/test
 });
 
 // Create drizzle instance
 export const db = drizzle(client, { schema });
 
-// Add a function to execute raw SQL queries if needed
-export async function executeSqlQuery(sql: string, params: any[] = []) {
-  try {
-    return await client.unsafe(sql, params);
-  } catch (error) {
-    console.error("Error executing SQL query:", error);
-    throw error;
-  }
-}
-
 // Add a retry mechanism for database connections
 export async function initDb(retries = 3) {
   console.log('Connecting to PostgreSQL database...');
   
-  let attempts = 0;
-  while (attempts < retries) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      attempts++;
-      console.log(`Connection attempt ${attempts}/${retries}...`);
+      console.log(`Connection attempt ${attempt}/${retries}...`);
       // Test the connection with a simple query
-      const result = await client`SELECT NOW()`;
+      await client`SELECT 1 as connection_test`;
       console.log('PostgreSQL database connected successfully');
       return true;
     } catch (error) {
-      console.error(`Failed connection attempt ${attempts}/${retries}:`, error);
+      console.error(`Connection attempt ${attempt} failed:`, error);
       
-      if (attempts >= retries) {
-        console.error('Failed to connect to PostgreSQL database after all retry attempts');
+      if (attempt === retries) {
+        console.error('All connection attempts failed');
         return false;
       }
       
       // Wait before retrying
-      console.log(`Waiting 2 seconds before retry...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const waitTime = 2000; // 2 seconds
+      console.log(`Waiting ${waitTime}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
   
