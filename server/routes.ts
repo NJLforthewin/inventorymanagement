@@ -15,6 +15,71 @@ import { ZodError, z } from "zod";
 import { fromZodError } from "zod-validation-error";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Debug endpoint to check database status
+  app.get("/api/debug/db-status", async (req, res) => {
+    try {
+      // Check database connection
+      console.log('Database URL:', process.env.DATABASE_URL ? '[CONFIGURED]' : '[NOT CONFIGURED]');
+      
+      // Try to query the users table
+      const { users, total } = await storage.getUsers(1, 10);
+      console.log(`Found ${total} users in database`);
+      
+      // Check if tables exist by trying to query them
+      const departments = await storage.getDepartments();
+      console.log(`Found ${departments.length} departments in database`);
+      
+      // Return status
+      res.status(200).json({
+        databaseConnected: true,
+        usersCount: total,
+        departmentsCount: departments.length,
+        seedingNeeded: total === 0 || departments.length === 0
+      });
+    } catch (error: any) {
+      console.error('Database check error:', error);
+      res.status(500).json({
+        databaseConnected: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+
+  // Debug endpoint to force database seeding
+  app.post("/api/debug/force-seed", async (req, res) => {
+    try {
+      console.log('Force seeding database...');
+      
+      // Check if storage is DatabaseStorage with seedInitialData method
+      if ('seedInitialData' in storage) {
+        await (storage as any).seedInitialData();
+        console.log('Seeding completed');
+      } else {
+        console.log('Storage does not have seedInitialData method');
+        return res.status(400).json({
+          success: false,
+          error: "Storage implementation does not support direct seeding"
+        });
+      }
+      
+      // Check if it worked
+      const { users, total } = await storage.getUsers(1, 10);
+      const departments = await storage.getDepartments();
+      
+      res.status(200).json({
+        success: true,
+        usersCount: total,
+        departmentsCount: departments.length
+      });
+    } catch (error: any) {
+      console.error('Force seed error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+
   // Setup authentication
   setupAuth(app);
 
@@ -438,20 +503,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Import the hashPassword function
       const { hashPassword } = await import('./utils/password');
       
-      // Hash the password before storing
       const user = await storage.createUser({
         ...validatedData,
-        password: await hashPassword(validatedData.password)
+        password: await hashPassword(validatedData.password),
       });
       
       // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "created",
-        details: `Created user: ${user.username} (${user.role})`
+        details: `Created user: ${user.username}`
       });
       
-      // Don't send the password back
+      // Don't send the password to the client
       const { password, ...userWithoutPassword } = user;
       res.status(201).json(userWithoutPassword);
     } catch (error) {
@@ -459,32 +523,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
+  app.get("/api/users/:id", isAdmin, async (req, res, next) => {
+    try {
+      const id = parseInt(req.params.id);
+      const user = await storage.getUser(id);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Don't send the password to the client
+      const { password, ...userWithoutPassword } = user;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
   app.put("/api/users/:id", isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
-      // Parse the data using z.object to validate only the fields we want to update
-      const updateUserSchema = z.object({
-        name: z.string().optional(),
-        username: z.string().optional(),
-        email: z.string().email().optional(),
-        role: z.enum(['admin', 'staff']).optional(),
-        department: z.string().nullable().optional(),
-        active: z.boolean().optional()
-      });
-      const userData = updateUserSchema.parse(req.body);
       
-      if (userData.username) {
-        const existingUser = await storage.getUserByUsername(userData.username);
-        if (existingUser && existingUser.id !== id) {
-          return res.status(400).json({ message: "Username already exists" });
-        }
+      // Use a simpler approach - directly parse without trying to use partial()
+      const userData = req.body;
+      
+      // If password is being updated, hash it
+      if (userData.password) {
+        // Import the hashPassword function
+        const { hashPassword } = await import('./utils/password');
+        
+        userData.password = await hashPassword(userData.password);
       }
       
-      if (userData.email) {
-        const existingEmail = await storage.getUserByEmail(userData.email);
-        if (existingEmail && existingEmail.id !== id) {
-          return res.status(400).json({ message: "Email already exists" });
-        }
+      // Delete confirmPassword if present
+      if ('confirmPassword' in userData) {
+        delete userData.confirmPassword;
       }
       
       const user = await storage.updateUser(id, userData);
@@ -500,22 +573,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: `Updated user: ${user.username}`
       });
       
-      // Don't send the password back
+      // Don't send the password to the client
       const { password, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
-      handleZodError(error, req, res, next);
+      next(error);
     }
   });
   
-  app.put("/api/users/:id/toggle-active", isAdmin, async (req, res, next) => {
+  app.post("/api/users/:id/toggle-active", isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
-      
-      // Prevent deactivating yourself
-      if (id === req.user!.id) {
-        return res.status(400).json({ message: "Cannot deactivate your own account" });
-      }
       
       const user = await storage.toggleUserActive(id);
       
@@ -530,7 +598,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         details: `${user.active ? 'Activated' : 'Deactivated'} user: ${user.username}`
       });
       
-      // Don't send the password back
+      // Don't send the password to the client
       const { password, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
@@ -538,7 +606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // Audit log routes (admin only)
+  // Audit logs (admin only)
   app.get("/api/audit-logs", isAdmin, async (req, res, next) => {
     try {
       const page = req.query.page ? parseInt(req.query.page as string) : 1;
@@ -548,9 +616,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (req.query.userId) filters.userId = parseInt(req.query.userId as string);
       if (req.query.itemId) filters.itemId = parseInt(req.query.itemId as string);
-      if (req.query.activityType) filters.activityType = req.query.activityType;
       if (req.query.startDate) filters.startDate = new Date(req.query.startDate as string);
       if (req.query.endDate) filters.endDate = new Date(req.query.endDate as string);
+      if (req.query.activityType) filters.activityType = req.query.activityType;
       
       const { logs, total } = await storage.getAuditLogs(page, limit, filters);
       
@@ -566,61 +634,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
   
-  // SQL Server connection test endpoint
-  app.get("/api/sql-connection-test", isAdmin, async (req, res, next) => {
-    try {
-      const isConnected = await testSqlConnection();
-      if (isConnected) {
-        res.json({ 
-          status: "success", 
-          message: "Successfully connected to SQL Server"
-        });
-      } else {
-        res.status(500).json({ 
-          status: "error", 
-          message: "Failed to connect to SQL Server"
-        });
-      }
-    } catch (error) {
-      console.error("SQL Server connection test error:", error);
-      res.status(500).json({ 
-        status: "error", 
-        message: "An error occurred while testing the SQL Server connection",
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
+  // Create server
+  const server = createServer(app);
   
-  // SQL Server query execution endpoint
-  app.post("/api/sql-query", isAdmin, async (req, res, next) => {
-    try {
-      const { query, params } = req.body;
-      
-      if (!query || typeof query !== 'string') {
-        return res.status(400).json({ 
-          status: "error", 
-          message: "Query is required and must be a string" 
-        });
-      }
-      
-      // Execute the query
-      const result = await executeSqlQuery(query, params);
-      res.json({ 
-        status: "success", 
-        data: result 
-      });
-    } catch (error) {
-      console.error("SQL query execution error:", error);
-      res.status(500).json({ 
-        status: "error", 
-        message: "An error occurred while executing the SQL query",
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  console.log("Creating HTTP server...");
-  const httpServer = createServer(app);
-  console.log("HTTP server created successfully");
-  return httpServer;
+  return server;
 }
