@@ -106,6 +106,20 @@ const httpServer = app.listen(port, "0.0.0.0", () => {
   log(`API server started on port ${port}. Now connecting to database...`);
 });
 
+app.get("/api/debug/db-connection", (req, res) => {
+  // Mask password in URL for security
+  const dbUrl = process.env.DATABASE_URL || 'not set';
+  const maskedUrl = dbUrl.replace(/:[^:@]+@/, ':***@');
+  
+  res.json({
+    database_url: maskedUrl,
+    ssl_enabled: true,
+    ssl_mode: 'with rejectUnauthorized: false',
+    node_env: process.env.NODE_ENV || 'not set',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // THEN connect to database and register routes
 (async () => {
   try {

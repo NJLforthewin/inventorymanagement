@@ -11,12 +11,15 @@ if (!process.env.DATABASE_URL) {
 // Use environment variables for connection
 const connectionString = process.env.DATABASE_URL;
 
-// Create postgres client
+// Create postgres client with improved SSL configuration for Render
 const client = postgres(connectionString, { 
   max: 3,
-  ssl: true, // Enable SSL
+  ssl: {
+    rejectUnauthorized: false  // Important for connecting to Render PostgreSQL
+  },
   idle_timeout: 30,
-  connect_timeout: 15
+  connect_timeout: 30,  // Increased timeout for initial connection
+  debug: true  // Enable debug logging for connection issues
 });
 
 // Create drizzle instance
@@ -32,15 +35,32 @@ export async function executeSqlQuery(sql: string, params: any[] = []) {
   }
 }
 
-export async function initDb() {
+// Add a retry mechanism for database connections
+export async function initDb(retries = 3) {
   console.log('Connecting to PostgreSQL database...');
-  try {
-    // Test the connection with a simple query
-    const result = await client`SELECT NOW()`;
-    console.log('PostgreSQL database connected successfully');
-    return true;
-  } catch (error) {
-    console.error('Failed to connect to PostgreSQL database:', error);
-    return false;
+  
+  let attempts = 0;
+  while (attempts < retries) {
+    try {
+      attempts++;
+      console.log(`Connection attempt ${attempts}/${retries}...`);
+      // Test the connection with a simple query
+      const result = await client`SELECT NOW()`;
+      console.log('PostgreSQL database connected successfully');
+      return true;
+    } catch (error) {
+      console.error(`Failed connection attempt ${attempts}/${retries}:`, error);
+      
+      if (attempts >= retries) {
+        console.error('Failed to connect to PostgreSQL database after all retry attempts');
+        return false;
+      }
+      
+      // Wait before retrying
+      console.log(`Waiting 2 seconds before retry...`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
   }
+  
+  return false;
 }
