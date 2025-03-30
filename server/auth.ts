@@ -31,10 +31,10 @@ export function setupAuth(app: Express) {
     store: storage.sessionStore,
     cookie: {
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000
     }
   };
-
   app.set("trust proxy", 1);
   app.use(session(sessionSettings));
   app.use(passport.initialize());
@@ -98,12 +98,26 @@ export function setupAuth(app: Express) {
   });
 
   app.post("/api/login", (req, res, next) => {
+    console.log('Login attempt:', req.body.username);
+    
     passport.authenticate('local', (err: any, user: Express.User | false | null, info: { message?: string } | undefined) => {
-      if (err) return next(err);
-      if (!user) return res.status(401).json({ message: info?.message || "Invalid credentials" });
+      if (err) {
+        console.error('Login error:', err);
+        return next(err);
+      }
+      
+      if (!user) {
+        console.log('Login failed:', info?.message || "Invalid credentials");
+        return res.status(401).json({ message: info?.message || "Invalid credentials" });
+      }
       
       req.login(user, (err: any) => {
-        if (err) return next(err);
+        if (err) {
+          console.error('Session creation error:', err);
+          return next(err);
+        }
+        
+        console.log('User logged in successfully:', user.username);
         
         // Don't send the password to the client
         const { password, ...userWithoutPassword } = user;

@@ -152,7 +152,7 @@ export default function UserManagementPage() {
             size="icon"
             onClick={() => setDeactivateUserId(row.id)}
             title={row.active ? "Deactivate" : "Activate"}
-            disabled={row.role === "admin" && row.active} // Can't deactivate admin users
+            disabled={isLoading || false} // Can't deactivate admin users
           >
             {row.active ? (
               <UserX className="h-4 w-4 text-red-500" />

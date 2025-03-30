@@ -94,16 +94,13 @@ export class DatabaseStorage implements IStorage {
     // Use PostgreSQL session store if DATABASE_URL is available, otherwise use memory store
     if (process.env.DATABASE_URL) {
       try {
-        const pool = require('pg').Pool;
+        const { Pool } = require('pg');
         this.sessionStore = new PostgresSessionStore({
-          pool: new pool({
-            host: process.env.PGHOST || 'localhost',
-            port: 6000,
-            user: process.env.PGUSER || 'postgres',
-            password: process.env.PGPASSWORD || 'postgres',
-            database: process.env.PGDATABASE || 'postgres',
-            ssl: false
-          }),
+          conObject: {
+            connectionString: process.env.DATABASE_URL,
+            ssl: { rejectUnauthorized: false } // Required for Render PostgreSQL
+          },
+          tableName: 'session',
           createTableIfMissing: true
         });
         console.log("Using PostgreSQL session store");
@@ -121,10 +118,136 @@ export class DatabaseStorage implements IStorage {
       console.log("Using memory session store");
     }
     
+    // Initialize database with seed data if needed
+    this.initializeDatabase();
+  }
+  
+  private async initializeDatabase() {
+    try {
+      console.log('Checking if database needs to be initialized...');
+      
+      // Check if users exist
+      const { users, total } = await this.getUsers(1, 1);
+      const departments = await this.getDepartments();
+      
+      if (total === 0 || departments.length === 0) {
+        console.log('Database is empty, seeding initial data...');
+        await this.seedInitialData();
+        console.log('Initial data seeded successfully');
+      } else {
+        console.log('Database already contains data, skipping initialization');
+      }
+    } catch (error) {
+      console.error('Error initializing database:', error);
+    }
+    
     // Initialize with default admin user if needed
     this.initializeDefaultAdmin();
   }
-  
+  private async seedInitialData(): Promise<void> {
+    try {
+      console.log('Starting to seed initial data...');
+      
+      // Import the hashPassword function
+      const { hashPassword } = await import('./utils/password');
+      
+      // Create admin user
+      console.log('Creating admin user...');
+      const admin = await this.createUser({
+        name: "Admin User",
+        username: "admin",
+        email: "admin@hospital.org",
+        password: await hashPassword("admin123"),
+        role: "admin",
+        department: "Administration",
+        active: true,
+        confirmPassword: "admin123"
+      });
+      console.log('Admin user created:', admin.username);
+      
+      // Create staff user
+      console.log('Creating staff user...');
+      const staff = await this.createUser({
+        name: "Staff User",
+        username: "staff",
+        email: "staff@hospital.org",
+        password: await hashPassword("staff123"),
+        role: "staff",
+        department: "Emergency",
+        active: true,
+        confirmPassword: "staff123"
+      });
+      console.log('Staff user created:', staff.username);
+      
+      // Create departments
+      console.log('Creating departments...');
+      const emergency = await this.createDepartment({ name: "Emergency", description: "Emergency department" });
+      const surgery = await this.createDepartment({ name: "Surgery", description: "Surgery department" });
+      const pediatrics = await this.createDepartment({ name: "Pediatrics", description: "Pediatrics department" });
+      const cardiology = await this.createDepartment({ name: "Cardiology", description: "Cardiology department" });    
+      const general = await this.createDepartment({ name: "General", description: "General department" });
+      console.log('Departments created successfully');
+      
+      // Create categories
+      console.log('Creating categories...');
+      const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
+      const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
+      const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
+      const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
+      console.log('Categories created successfully');
+      
+      // Create inventory items
+      console.log('Creating inventory items...');
+      await this.createInventoryItem({
+        itemId: "PPE-001",
+        name: "N95 Masks",
+        description: "N95 respirator masks",
+        departmentId: emergency.id,
+        categoryId: ppe.id,
+        currentStock: 25,
+        unit: "units",
+        threshold: 50
+      });
+      
+      await this.createInventoryItem({
+        itemId: "PPE-002",
+        name: "Surgical Gloves (S)",
+        description: "Small surgical gloves",
+        departmentId: surgery.id,
+        categoryId: ppe.id,
+        currentStock: 10,
+        unit: "boxes",
+        threshold: 20
+      });
+      
+      await this.createInventoryItem({
+        itemId: "MED-023",
+        name: "IV Saline Solution",
+        description: "Intravenous saline solution",
+        departmentId: general.id,
+        categoryId: pharmaceuticals.id,
+        currentStock: 30,
+        unit: "bags",
+        threshold: 40
+      });
+      
+      await this.createInventoryItem({
+        itemId: "EQP-108",
+        name: "Blood Pressure Monitor",
+        description: "Digital blood pressure monitoring device",
+        departmentId: cardiology.id,
+        categoryId: equipment.id,
+        currentStock: 15,
+        unit: "units",
+        threshold: 5
+      });
+      console.log('Inventory items created successfully');
+      
+    } catch (error) {
+      console.error("Error seeding initial data:", error);
+      throw error;
+    }
+  }
   private async initializeDefaultAdmin() {
     try {
       // Check if admin user exists
@@ -727,11 +850,14 @@ export class MemStorage implements IStorage {
   
   private async seedInitialData(): Promise<void> {
     try {
+      console.log('Starting to seed initial data...');
+      
       // Import the hashPassword function
       const { hashPassword } = await import('./utils/password');
       
       // Create admin user
-      this.createUser({
+      console.log('Creating admin user...');
+      const admin = await this.createUser({
         name: "Admin User",
         username: "admin",
         email: "admin@hospital.org",
@@ -741,9 +867,11 @@ export class MemStorage implements IStorage {
         active: true,
         confirmPassword: "admin123"
       });
+      console.log('Admin user created:', admin.username);
       
       // Create staff user
-      this.createUser({
+      console.log('Creating staff user...');
+      const staff = await this.createUser({
         name: "Staff User",
         username: "staff",
         email: "staff@hospital.org",
@@ -753,70 +881,77 @@ export class MemStorage implements IStorage {
         active: true,
         confirmPassword: "staff123"
       });
+      console.log('Staff user created:', staff.username);
+      
+      // Create departments
+      console.log('Creating departments...');
+      const emergency = await this.createDepartment({ name: "Emergency", description: "Emergency department" });
+      const surgery = await this.createDepartment({ name: "Surgery", description: "Surgery department" });
+      const pediatrics = await this.createDepartment({ name: "Pediatrics", description: "Pediatrics department" });
+      const cardiology = await this.createDepartment({ name: "Cardiology", description: "Cardiology department" });    
+      const general = await this.createDepartment({ name: "General", description: "General department" });
+      console.log('Departments created successfully');
+      
+      // Create categories
+      console.log('Creating categories...');
+      const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
+      const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
+      const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
+      const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
+      console.log('Categories created successfully');
+      
+      // Create inventory items
+      console.log('Creating inventory items...');
+      await this.createInventoryItem({
+        itemId: "PPE-001",
+        name: "N95 Masks",
+        description: "N95 respirator masks",
+        departmentId: emergency.id,
+        categoryId: ppe.id,
+        currentStock: 25,
+        unit: "units",
+        threshold: 50
+      });
+      
+      await this.createInventoryItem({
+        itemId: "PPE-002",
+        name: "Surgical Gloves (S)",
+        description: "Small surgical gloves",
+        departmentId: surgery.id,
+        categoryId: ppe.id,
+        currentStock: 10,
+        unit: "boxes",
+        threshold: 20
+      });
+      
+      await this.createInventoryItem({
+        itemId: "MED-023",
+        name: "IV Saline Solution",
+        description: "Intravenous saline solution",
+        departmentId: general.id,
+        categoryId: pharmaceuticals.id,
+        currentStock: 30,
+        unit: "bags",
+        threshold: 40
+      });
+      
+      await this.createInventoryItem({
+        itemId: "EQP-108",
+        name: "Blood Pressure Monitor",
+        description: "Digital blood pressure monitoring device",
+        departmentId: cardiology.id,
+        categoryId: equipment.id,
+        currentStock: 15,
+        unit: "units",
+        threshold: 5
+      });
+      console.log('Inventory items created successfully');
+      
     } catch (error) {
       console.error("Error seeding initial data:", error);
+      throw error;
     }
-    
-    // Create departments
-    const emergency = await this.createDepartment({ name: "Emergency", description: "Emergency department" });
-    const surgery = await this.createDepartment({ name: "Surgery", description: "Surgery department" });
-     const pediatrics = await this.createDepartment({ name: "Pediatrics", description: "Pediatrics department" });
-    const cardiology = await this.createDepartment({ name: "Cardiology", description: "Cardiology department" });    
-    const general = await this.createDepartment({ name: "General", description: "General department" });
-
-    
-    // Create categories
-    const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
-    const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
-    const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
-    const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
-    
-    // Create inventory items
-    this.createInventoryItem({
-      itemId: "PPE-001",
-      name: "N95 Masks",
-      description: "N95 respirator masks",
-      departmentId: emergency.id,
-      categoryId: ppe.id,
-      currentStock: 25,
-      unit: "units",
-      threshold: 50
-    });
-    
-    this.createInventoryItem({
-      itemId: "PPE-002",
-      name: "Surgical Gloves (S)",
-      description: "Small surgical gloves",
-      departmentId: surgery.id,
-      categoryId: ppe.id,
-      currentStock: 10,
-      unit: "boxes",
-      threshold: 20
-    });
-    
-    this.createInventoryItem({
-      itemId: "MED-023",
-      name: "IV Saline Solution",
-      description: "Intravenous saline solution",
-      departmentId: general.id,
-      categoryId: pharmaceuticals.id,
-      currentStock: 30,
-      unit: "bags",
-      threshold: 40
-    });
-    
-    this.createInventoryItem({
-      itemId: "EQP-108",
-      name: "Blood Pressure Monitor",
-      description: "Digital blood pressure monitoring device",
-      departmentId: cardiology.id,
-      categoryId: equipment.id,
-      currentStock: 15,
-      unit: "units",
-      threshold: 5
-    });
   }
-
   // User operations
   async getUser(id: number): Promise<User | undefined> {
     return this.users.get(id);

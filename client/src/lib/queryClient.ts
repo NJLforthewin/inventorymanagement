@@ -1,5 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import axios from 'axios';
 
+axios.defaults.withCredentials = true; 
 // Add this API_URL constant at the top of the file
 const API_URL = import.meta.env.PROD 
   ? "https://stockwell.onrender.com/api"
@@ -48,6 +50,14 @@ export async function apiRequest(
   await throwIfResNotOk(res);
   return res;
 }
+
+const apiClient = axios.create({
+  baseURL: API_URL,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
 
 type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
