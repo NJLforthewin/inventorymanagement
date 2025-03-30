@@ -3,11 +3,15 @@ import { registerRoutes } from "./routes";
 import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
-import { initDb } from './db-postgres';  // Correct import
+import { initDb } from './db-postgres';
+import { setupAuth } from './auth';
+import MemoryStore from 'memorystore';
+import session from "express-session";
 import 'dotenv/config';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const SessionStore = MemoryStore(session);
 
 // Simple logging function
 function log(message: string, source = "express") {
@@ -90,6 +94,23 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Session configuration - MUST be before setupAuth and registerRoutes
+const isProduction = process.env.NODE_ENV === 'production';
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'hospital-inventory-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  store: new SessionStore({ 
+    checkPeriod: 86400000 // prune expired entries every 24h
+  }),
+  cookie: {
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: 24 * 60 * 60 * 1000,
+    path: '/'
+  }
+}));
 
 // Add health check endpoint FIRST so it's available immediately
 app.get("/health", (req, res) => {
@@ -249,10 +270,15 @@ const httpServer = app.listen(port, "0.0.0.0", () => {
       log(`WARNING: ${error.message}. Server will continue running with limited functionality.`);
     }
     
-    // Register routes AFTER server is listening
+    // Setup authentication
+    setupAuth(app);
+    log('Authentication setup complete');
+    
+    // Register routes AFTER server is listening and auth is setup
     await registerRoutes(app);
+    log('Routes registered successfully');
 
-    // Error handling middleware
+    // Error handling middleware (should come AFTER routes)
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
       const status = err.status || err.statusCode || 500;
       const message = err.message || "Internal Server Error";
@@ -261,7 +287,7 @@ const httpServer = app.listen(port, "0.0.0.0", () => {
       console.error(`Error [${status}]:`, err);
     });
 
-    // API-only server - no static file serving in production
+    // IMPORTANT: This wildcard route should be LAST
     app.use("*", (req, res) => {
       if (req.originalUrl.startsWith("/api")) {
         return res.status(404).json({ message: "API endpoint not found" });
