@@ -276,28 +276,34 @@ export class DatabaseStorage implements IStorage {
     }
   }
   
-  // User operations
   async getUser(id: number): Promise<User | undefined> {
     try {
-      const [user] = await db.select().from(users).where(eq(users.id, id));
-      return user;
+      // Use the executeSqlQuery function from db-postgres.ts
+      const result = await executeSqlQuery('SELECT * FROM users WHERE id = $1', [id]);
+      
+      if (result && result.length > 0) {
+        return result[0] as User;
+      }
+      return undefined;
     } catch (error) {
-      console.error("Error getting user:", error);
+      console.error("Error getting user by id:", error);
       throw error;
     }
   }
   
   async getUserByUsername(username: string): Promise<User | undefined> {
     try {
-      // Direct SQL approach for more reliability
-      const result = await db.execute(sql`
-        SELECT * FROM users WHERE username = ${username}
-      `);
+      console.log(`Looking up user by username: ${username}`);
+      // Use the executeSqlQuery function from db-postgres.ts
+      const result = await executeSqlQuery('SELECT * FROM users WHERE username = $1', [username]);
       
-      // Check if rows property exists and has items
-      if (result.rows && result.rows.length > 0) {
-        return result.rows[0] as User;
+      console.log(`Result from database:`, result);
+      
+      if (result && result.length > 0) {
+        console.log(`User found:`, result[0]);
+        return result[0] as User;
       }
+      console.log(`No user found with username: ${username}`);
       return undefined;
     } catch (error) {
       console.error("Error getting user by username:", error);

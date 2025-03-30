@@ -34,9 +34,9 @@ export function setupAuth(app: Express) {
     saveUninitialized: false,
     store: storage.sessionStore,
     cookie: {
-      // For cross-origin requests between Netlify and Render:
-      secure: true,
-      sameSite: 'none',
+      // Only use secure cookies in production:
+      secure: isProduction, // <-- Change this line
+      sameSite: isProduction ? 'none' : 'lax', // <-- Change this line too
       maxAge: 24 * 60 * 60 * 1000,
       path: '/'
     }
@@ -208,11 +208,11 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
   res.status(401).json({ message: "Unauthorized" });
 }
 
-// Middleware to check if user is admin
+// Middleware to check if user is admin OR staff
 export function isAdmin(req: Request, res: Response, next: NextFunction) {
-  if (req.isAuthenticated() && req.user!.role === 'admin') {
+  if (req.isAuthenticated() && (req.user!.role === 'admin' || req.user!.role === 'staff')) {
     return next();
   }
-  console.log('Forbidden access attempt - admin required');
-  res.status(403).json({ message: "Forbidden - Admin access required" });
+  console.log('Forbidden access attempt - admin/staff required');
+  res.status(403).json({ message: "Forbidden - Admin or Staff access required" });
 }

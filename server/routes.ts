@@ -50,6 +50,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/debug/db-direct", async (req, res) => {
+    try {
+      // Test direct SQL query using the executeSqlQuery function
+      const result = await executeSqlQuery("SELECT COUNT(*) FROM users");
+      const usersCount = parseInt(result[0].count);
+      
+      res.status(200).json({
+        success: true,
+        usersCount: usersCount,
+        rawResult: result
+      });
+    } catch (error: unknown) {
+      console.error('Direct database query error:', error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
   // Debug endpoint to force database seeding
   app.post("/api/debug/force-seed", async (req, res) => {
     try {
@@ -184,8 +204,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Setup authentication
-  setupAuth(app);
+  // Add this before the setupAuth(app) line in routes.ts
+app.get("/api/debug/basic-ping", (req, res) => {
+  res.status(200).json({
+    message: "Basic ping successful",
+    timestamp: new Date().toISOString()
+  });
+});
+ // Add this before the setupAuth(app) line in routes.ts
+app.get("/api/debug/db-basic", async (req, res) => {
+  try {
+    const result = await executeSqlQuery("SELECT NOW() as current_time");
+    
+    res.status(200).json({
+      success: true,
+      dbResponding: true,
+      result: result,
+      message: "Database connection working"
+    });
+  } catch (error: any) {
+    console.error('Database basic check error:', error);
+    res.status(500).json({
+      success: false,
+      dbResponding: false,
+      error: error.message || String(error)
+    });
+  }
+});
 
   // Error handling middleware for Zod validation errors
   const handleZodError = (err: unknown, req: Request, res: Response, next: NextFunction) => {
@@ -1041,7 +1086,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next(error);
     }
   });
-  
+  setupAuth(app);
   // Create server
   const server = createServer(app);
   

@@ -2,13 +2,14 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '../shared/schema';  // Note the path change
 
+// Set default connection string for development if not provided
+if (!process.env.DATABASE_URL) {
+  console.warn('DATABASE_URL not set, using default local connection');
+  process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/stockwell';
+}
+
 // Use environment variables for connection
 const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  console.error('DATABASE_URL environment variable is not set');
-  throw new Error('DATABASE_URL environment variable is not set');
-}
 
 // Create postgres client
 const client = postgres(connectionString, { max: 1 });
