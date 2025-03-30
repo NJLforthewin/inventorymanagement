@@ -12,7 +12,12 @@ if (!process.env.DATABASE_URL) {
 const connectionString = process.env.DATABASE_URL;
 
 // Create postgres client
-const client = postgres(connectionString, { max: 1 });
+const client = postgres(connectionString, { 
+  max: 3,
+  ssl: true, // Enable SSL
+  idle_timeout: 30,
+  connect_timeout: 15
+});
 
 // Create drizzle instance
 export const db = drizzle(client, { schema });
