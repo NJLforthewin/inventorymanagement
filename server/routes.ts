@@ -204,7 +204,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Creating database tables...');
       
       // Create users table
-      await executeSqlQuery(`
+      await db.execute(sql`
         CREATE TABLE IF NOT EXISTS users (
           id SERIAL PRIMARY KEY,
           name TEXT NOT NULL,
@@ -215,47 +215,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
           department TEXT,
           active BOOLEAN DEFAULT true,
           last_login TIMESTAMP,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
+          created_at TIMESTAMP DEFAULT NOW()
         )
       `);
       
       // Create departments table
-      await executeSqlQuery(`
+      await db.execute(sql`
         CREATE TABLE IF NOT EXISTS departments (
           id SERIAL PRIMARY KEY,
           name TEXT UNIQUE NOT NULL,
           description TEXT,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
+          created_at TIMESTAMP DEFAULT NOW()
         )
       `);
       
       // Create categories table
-      await executeSqlQuery(`
+      await db.execute(sql`
         CREATE TABLE IF NOT EXISTS categories (
           id SERIAL PRIMARY KEY,
           name TEXT UNIQUE NOT NULL,
           description TEXT,
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW()
+          created_at TIMESTAMP DEFAULT NOW()
         )
       `);
       
-      // Check if it worked
-      const tables = await executeSqlQuery(`
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema='public'
+      // Create inventory_items table
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS inventory_items (
+          id SERIAL PRIMARY KEY,
+          item_id TEXT UNIQUE NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          department_id INTEGER NOT NULL,
+          category_id INTEGER NOT NULL,
+          current_stock INTEGER NOT NULL DEFAULT 0,
+          unit TEXT NOT NULL,
+          threshold INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'in_stock',
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          FOREIGN KEY (department_id) REFERENCES departments(id),
+          FOREIGN KEY (category_id) REFERENCES categories(id)
+        )
       `);
       
+      // Create audit_logs table
+      await db.execute(sql`
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL,
+          activity_type TEXT NOT NULL,
+          item_id INTEGER,
+          details TEXT NOT NULL,
+          created_at TIMESTAMP DEFAULT NOW(),
+          FOREIGN KEY (user_id) REFERENCES users(id),
+          FOREIGN KEY (item_id) REFERENCES inventory_items(id)
+        )
+      `);
       
       res.status(200).json({
         success: true,
-        tables: Array.isArray(tables) ? tables.map(t => t.table_name) : tables
+        message: "Database tables created successfully"
       });
     } catch (error: any) {
-      console.error('Create tables error:', error);
+      console.error('Error creating tables:', error);
       res.status(500).json({
         success: false,
         error: error.message || String(error)
