@@ -168,6 +168,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     next(err);
   };
+  
+  app.post("/api/debug/create-tables", async (req, res) => {
+    try {
+      console.log('Creating database tables...');
+      
+      // Create users table
+      await executeSqlQuery(`
+        CREATE TABLE IF NOT EXISTS users (
+          id SERIAL PRIMARY KEY,
+          name TEXT NOT NULL,
+          username TEXT UNIQUE NOT NULL,
+          email TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL,
+          role TEXT NOT NULL,
+          department TEXT,
+          active BOOLEAN DEFAULT true,
+          last_login TIMESTAMP,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      
+      // Create departments table
+      await executeSqlQuery(`
+        CREATE TABLE IF NOT EXISTS departments (
+          id SERIAL PRIMARY KEY,
+          name TEXT UNIQUE NOT NULL,
+          description TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      
+      // Create categories table
+      await executeSqlQuery(`
+        CREATE TABLE IF NOT EXISTS categories (
+          id SERIAL PRIMARY KEY,
+          name TEXT UNIQUE NOT NULL,
+          description TEXT,
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
+        )
+      `);
+      
+      // Check if it worked
+      const tables = await executeSqlQuery(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema='public'
+      `);
+      
+      
+      res.status(200).json({
+        success: true,
+        tables: Array.isArray(tables) ? tables.map(t => t.table_name) : tables
+      });
+    } catch (error: any) {
+      console.error('Create tables error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
+
+  app.get("/api/debug/check-tables", async (req, res) => {
+    try {
+      // Try to query if tables exist
+      const results = await executeSqlQuery(`
+        SELECT table_name 
+        FROM information_schema.tables 
+        WHERE table_schema='public'
+      `);
+      const userTableExists = Array.isArray(results) 
+         ? results.some(r => r.table_name === 'users')
+          : false;
+
+    } catch (error: any) {
+      console.error('Table check error:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+  });
 
 
   app.use('/api', (req, res, next) => {
