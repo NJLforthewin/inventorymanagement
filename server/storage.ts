@@ -856,21 +856,54 @@ export class MemStorage implements IStorage {
   }
 
   // User operations
-  async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+  // User operations
+async getUser(id: number): Promise<User | undefined> {
+  try {
+    const result = await db.execute(sql`
+      SELECT * FROM users WHERE id = ${id}
+    `);
+    
+    if (result.rows && result.rows.length > 0) {
+      return result.rows[0] as User;
+    }
+    return undefined;
+  } catch (error) {
+    console.error("Error getting user by id:", error);
+    throw error;
   }
-  
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+}
+
+async getUserByUsername(username: string): Promise<User | undefined> {
+  try {
+    const result = await db.execute(sql`
+      SELECT * FROM users WHERE username = ${username}
+    `);
+    
+    if (result.rows && result.rows.length > 0) {
+      return result.rows[0] as User;
+    }
+    return undefined;
+  } catch (error) {
+    console.error("Error getting user by username:", error);
+    throw error;
   }
-  
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.email === email,
-    );
+}
+
+async getUserByEmail(email: string): Promise<User | undefined> {
+  try {
+    const result = await db.execute(sql`
+      SELECT * FROM users WHERE email = ${email}
+    `);
+    
+    if (result.rows && result.rows.length > 0) {
+      return result.rows[0] as User;
+    }
+    return undefined;
+  } catch (error) {
+    console.error("Error getting user by email:", error);
+    throw error;
   }
+}
   
   async createUser(userData: InsertUser): Promise<User> {
     const id = this.userIdCounter++;
