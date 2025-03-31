@@ -46,7 +46,8 @@ app.set("trust proxy", 1);
 // CORS middleware with expanded configuration
 app.use(cors({
   origin: [
-    "https://stockwell-app.onrender.com", 
+    "https://stockwell-app.onrender.com",  // Add your new domain
+    "https://stockwell.netlify.app", 
     "http://localhost:3000", 
     "http://localhost:5000", 
     "http://localhost:5173"
