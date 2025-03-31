@@ -1,0 +1,8 @@
+/*
+  Cache-Control: public, max-age=0, must-revalidate
+/*.css
+  Content-Type: text/css
+/*.js
+  Content-Type: application/javascript
+/*.svg
+  Content-Type: image/svg+xml

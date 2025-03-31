@@ -34,9 +34,9 @@ export function setupAuth(app: Express) {
     saveUninitialized: false,
     store: storage.sessionStore,
     cookie: {
-      // Only use secure cookies in production:
-      secure: isProduction, // <-- Change this line
-      sameSite: isProduction ? 'none' : 'lax', // <-- Change this line too
+      // Always use secure cookies in production with proper cross-domain settings
+      secure: true,
+      sameSite: 'none',
       maxAge: 24 * 60 * 60 * 1000,
       path: '/'
     }

@@ -1,3 +1,4 @@
+// use-auth.tsx
 import { createContext, ReactNode, useContext } from "react";
 import {
   useQuery,
@@ -5,7 +6,7 @@ import {
   UseMutationResult,
 } from "@tanstack/react-query";
 import { insertUserSchema, User as SelectUser, InsertUser, LoginUser } from "@shared/schema";
-import { getQueryFn, apiRequest, queryClient } from "../lib/queryClient";
+import { getQueryFn, apiRequest, queryClient, apiClient, authAPI } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 type AuthContextType = {
@@ -27,13 +28,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
   } = useQuery<SelectUser | undefined, Error>({
     queryKey: ["/api/user"],
-    queryFn: getQueryFn({ on401: "returnNull" }),
+    queryFn: async () => {
+      try {
+        // Try the standard endpoint first
+        const response = await apiClient.get('/user');
+        return response.data;
+      } catch (error) {
+        console.log('Standard user endpoint failed, trying direct user');
+        // Fall back to the direct endpoint
+        const directResponse = await apiClient.get('/direct-user');
+        return directResponse.data.user;
+      }
+    },
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false
   });
 
   const loginMutation = useMutation({
     mutationFn: async (credentials: LoginUser) => {
-      const res = await apiRequest("POST", "/api/login", credentials);
-      return await res.json();
+      try {
+        // Try standard login first
+        console.log(`Making POST request to login endpoint`);
+        const response = await apiClient.post('/login', credentials);
+        return response.data;
+      } catch (error) {
+        console.log('Standard login failed, trying direct login');
+        // If standard login fails, try direct login
+        const directResponse = await apiClient.post('/direct-login', credentials);
+        return directResponse.data.user;
+      }
     },
     onSuccess: (user: Omit<SelectUser, "password">) => {
       queryClient.setQueryData(["/api/user"], user);

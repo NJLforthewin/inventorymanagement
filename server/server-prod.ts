@@ -46,7 +46,7 @@ app.set("trust proxy", 1);
 // CORS middleware with expanded configuration
 app.use(cors({
   origin: [
-    "https://stockwell-app.onrender.com",  // Add your new domain
+    "https://stockwell-app.onrender.com",
     "https://stockwell.netlify.app", 
     "http://localhost:3000", 
     "http://localhost:5000", 
@@ -120,8 +120,8 @@ app.use(session({
     checkPeriod: 86400000 // prune expired entries every 24h
   }),
   cookie: {
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
+    secure: true, // Always use secure cookies in production
+    sameSite: 'none', // Required for cross-domain cookies
     maxAge: 24 * 60 * 60 * 1000,
     path: '/'
   }
@@ -407,28 +407,24 @@ const httpServer = app.listen(port, "0.0.0.0", () => {
       const message = err.message || "Internal Server Error";
 
       res.status(status).json({ message });
-      console.error(`Error [${status}]:`, err);
     });
-
-    // IMPORTANT: This wildcard route should be LAST
-    app.use("*", (req, res) => {
-      if (req.originalUrl.startsWith("/api")) {
-        return res.status(404).json({ message: "API endpoint not found" });
-      }
+    
+    // Serve static files for production
+    if (process.env.NODE_ENV === 'production') {
+      log('Setting up static file serving for production');
+      // Correctly serve static files in production
+      const publicPath = path.resolve(__dirname, '..', 'public');
+      app.use(express.static(publicPath));
       
-      res.status(200).json({ 
-        message: "Stock Well API Server", 
-        status: "running",
-        environment: process.env.NODE_ENV || 'development',
-        frontend: "https://stockwell-app.onrender.com"
+      // Serve index.html for any non-API routes to support client-side routing
+      app.get('*', (req, res) => {
+        // Skip API routes
+        if (req.path.startsWith('/api')) return;
+        res.sendFile(path.join(publicPath, 'index.html'));
       });
-    });
-
-    log(`API server fully initialized with routes`);
-    log(`NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
-    log(`Database URL: ${process.env.DATABASE_URL ? 'Configured' : 'Not configured'}`);
-    log(`Session Secret: ${process.env.SESSION_SECRET ? 'Configured' : 'Using default'}`);
+    }
   } catch (error) {
-    console.error('Server initialization error:', error);
+    log(`Fatal error during server initialization: ${error}`, "error");
+    process.exit(1);
   }
 })();

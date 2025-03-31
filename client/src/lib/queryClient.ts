@@ -2,9 +2,11 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import axios from 'axios';
 
 // Define API URL based on environment
-const API_URL = import.meta.env.PROD 
-  ? "https://stockwell.onrender.com/api" // Your backend URL
-  : "/api";
+const API_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.PROD 
+    ? "https://stockwell.onrender.com/api" 
+    : "/api");
+    
 console.log("API URL configured as:", API_URL);
 
 // Create dedicated API client
@@ -20,7 +22,6 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use(
   config => {
     console.log(`Request: ${config.method?.toUpperCase()} ${config.url}`);
-    console.log('Request headers:', config.headers);
     return config;
   },
   error => {
@@ -43,6 +44,37 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// API functions
+export const authAPI = {
+  login: async (username: string, password: string) => {
+    try {
+      console.log(`Making POST request to ${API_URL}/login`);
+      const response = await apiClient.post('/login', { username, password });
+      return response.data;
+    } catch (error) {
+      console.log('Standard login failed, trying direct login');
+      const directResponse = await apiClient.post('/direct-login', { username, password });
+      return directResponse.data;
+    }
+  },
+  
+  logout: async () => {
+    const response = await apiClient.post('/logout');
+    return response.data;
+  },
+  
+  getCurrentUser: async () => {
+    try {
+      const response = await apiClient.get('/user');
+      return response.data;
+    } catch (error) {
+      console.log('Standard user endpoint failed, trying direct user');
+      const directResponse = await apiClient.get('/direct-user');
+      return directResponse.data.user;
+    }
+  }
+};
 
 // Helper to prefix API paths
 function getFullUrl(path: string): string {
@@ -107,7 +139,7 @@ export const getQueryFn: <T>(options: {
         credentials: "include",
       });
 
-      console.log(`Query response: ${res.status} ${res.statusText}`);
+      console.log(`Query response: ${res.status}`);
       
       if (unauthorizedBehavior === "returnNull" && res.status === 401) {
         console.log("Unauthorized request - returning null as configured");
