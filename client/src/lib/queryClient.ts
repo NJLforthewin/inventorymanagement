@@ -3,7 +3,7 @@ import axios from 'axios';
 
 // Define API URL based on environment
 const API_URL = import.meta.env.PROD 
-  ? "/api"  // Use relative URL since frontend and backend are on same domain
+  ? "https://stockwell.onrender.com/api" // Your backend URL
   : "/api";
 console.log("API URL configured as:", API_URL);
 
