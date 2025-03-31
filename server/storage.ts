@@ -8,7 +8,7 @@ import { eq, and, like, gte, lte, desc, inArray } from "drizzle-orm";
 import { db, executeSqlQuery } from "./db";
 import session from "express-session";
 import createMemoryStore from "memorystore";
-import { sql } from "drizzle-orm";
+import * as mssql from 'mssql';
 import connectPg from "connect-pg-simple";
 
 const MemoryStore = createMemoryStore(session);
@@ -94,13 +94,16 @@ export class DatabaseStorage implements IStorage {
     // Use PostgreSQL session store if DATABASE_URL is available, otherwise use memory store
     if (process.env.DATABASE_URL) {
       try {
-        const { Pool } = require('pg');
+        const pool = require('pg').Pool;
         this.sessionStore = new PostgresSessionStore({
-          conObject: {
-            connectionString: process.env.DATABASE_URL,
-            ssl: { rejectUnauthorized: false } // Required for Render PostgreSQL
-          },
-          tableName: 'session',
+          pool: new pool({
+            host: process.env.PGHOST || 'localhost',
+            port: 6000,
+            user: process.env.PGUSER || 'postgres',
+            password: process.env.PGPASSWORD || 'postgres',
+            database: process.env.PGDATABASE || 'postgres',
+            ssl: false
+          }),
           createTableIfMissing: true
         });
         console.log("Using PostgreSQL session store");
@@ -118,136 +121,10 @@ export class DatabaseStorage implements IStorage {
       console.log("Using memory session store");
     }
     
-    // Initialize database with seed data if needed
-    this.initializeDatabase();
-  }
-  
-  private async initializeDatabase() {
-    try {
-      console.log('Checking if database needs to be initialized...');
-      
-      // Check if users exist
-      const { users, total } = await this.getUsers(1, 1);
-      const departments = await this.getDepartments();
-      
-      if (total === 0 || departments.length === 0) {
-        console.log('Database is empty, seeding initial data...');
-        await this.seedInitialData();
-        console.log('Initial data seeded successfully');
-      } else {
-        console.log('Database already contains data, skipping initialization');
-      }
-    } catch (error) {
-      console.error('Error initializing database:', error);
-    }
-    
     // Initialize with default admin user if needed
     this.initializeDefaultAdmin();
   }
-  private async seedInitialData(): Promise<void> {
-    try {
-      console.log('Starting to seed initial data...');
-      
-      // Import the hashPassword function
-      const { hashPassword } = await import('./utils/password');
-      
-      // Create admin user
-      console.log('Creating admin user...');
-      const admin = await this.createUser({
-        name: "Admin User",
-        username: "admin",
-        email: "admin@hospital.org",
-        password: await hashPassword("admin123"),
-        role: "admin",
-        department: "Administration",
-        active: true,
-        confirmPassword: "admin123"
-      });
-      console.log('Admin user created:', admin.username);
-      
-      // Create staff user
-      console.log('Creating staff user...');
-      const staff = await this.createUser({
-        name: "Staff User",
-        username: "staff",
-        email: "staff@hospital.org",
-        password: await hashPassword("staff123"),
-        role: "staff",
-        department: "Emergency",
-        active: true,
-        confirmPassword: "staff123"
-      });
-      console.log('Staff user created:', staff.username);
-      
-      // Create departments
-      console.log('Creating departments...');
-      const emergency = await this.createDepartment({ name: "Emergency", description: "Emergency department" });
-      const surgery = await this.createDepartment({ name: "Surgery", description: "Surgery department" });
-      const pediatrics = await this.createDepartment({ name: "Pediatrics", description: "Pediatrics department" });
-      const cardiology = await this.createDepartment({ name: "Cardiology", description: "Cardiology department" });    
-      const general = await this.createDepartment({ name: "General", description: "General department" });
-      console.log('Departments created successfully');
-      
-      // Create categories
-      console.log('Creating categories...');
-      const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
-      const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
-      const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
-      const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
-      console.log('Categories created successfully');
-      
-      // Create inventory items
-      console.log('Creating inventory items...');
-      await this.createInventoryItem({
-        itemId: "PPE-001",
-        name: "N95 Masks",
-        description: "N95 respirator masks",
-        departmentId: emergency.id,
-        categoryId: ppe.id,
-        currentStock: 25,
-        unit: "units",
-        threshold: 50
-      });
-      
-      await this.createInventoryItem({
-        itemId: "PPE-002",
-        name: "Surgical Gloves (S)",
-        description: "Small surgical gloves",
-        departmentId: surgery.id,
-        categoryId: ppe.id,
-        currentStock: 10,
-        unit: "boxes",
-        threshold: 20
-      });
-      
-      await this.createInventoryItem({
-        itemId: "MED-023",
-        name: "IV Saline Solution",
-        description: "Intravenous saline solution",
-        departmentId: general.id,
-        categoryId: pharmaceuticals.id,
-        currentStock: 30,
-        unit: "bags",
-        threshold: 40
-      });
-      
-      await this.createInventoryItem({
-        itemId: "EQP-108",
-        name: "Blood Pressure Monitor",
-        description: "Digital blood pressure monitoring device",
-        departmentId: cardiology.id,
-        categoryId: equipment.id,
-        currentStock: 15,
-        unit: "units",
-        threshold: 5
-      });
-      console.log('Inventory items created successfully');
-      
-    } catch (error) {
-      console.error("Error seeding initial data:", error);
-      throw error;
-    }
-  }
+  
   private async initializeDefaultAdmin() {
     try {
       // Check if admin user exists
@@ -276,40 +153,27 @@ export class DatabaseStorage implements IStorage {
     }
   }
   
+  // User operations
   async getUser(id: number): Promise<User | undefined> {
     try {
-      // Use the executeSqlQuery function from db-postgres.ts
-      const result = await executeSqlQuery('SELECT * FROM users WHERE id = $1', [id]);
-      
-      if (result && result.length > 0) {
-        return result[0] as User;
-      }
-      return undefined;
+      const [user] = await db.select().from(users).where(eq(users.id, id));
+      return user;
     } catch (error) {
-      console.error("Error getting user by id:", error);
+      console.error("Error getting user:", error);
       throw error;
     }
   }
   
   async getUserByUsername(username: string): Promise<User | undefined> {
     try {
-      console.log(`Looking up user by username: ${username}`);
-      // Use the executeSqlQuery function from db-postgres.ts
-      const result = await executeSqlQuery('SELECT * FROM users WHERE username = $1', [username]);
-      
-      console.log(`Result from database:`, result);
-      
-      if (result && result.length > 0) {
-        console.log(`User found:`, result[0]);
-        return result[0] as User;
-      }
-      console.log(`No user found with username: ${username}`);
-      return undefined;
+      const [user] = await db.select().from(users).where(eq(users.username, username));
+      return user;
     } catch (error) {
       console.error("Error getting user by username:", error);
       throw error;
     }
   }
+  
   async getUserByEmail(email: string): Promise<User | undefined> {
     try {
       const [user] = await db.select().from(users).where(eq(users.email, email));
@@ -360,25 +224,26 @@ export class DatabaseStorage implements IStorage {
     try {
       const offset = (page - 1) * limit;
       
-      // Use direct SQL for reliability
-      const usersResult = await db.execute(sql`
-        SELECT * FROM users
-        LIMIT ${limit} OFFSET ${offset}
-      `);
+      const usersResult = await db
+        .select()
+        .from(users)
+        .limit(limit)
+        .offset(offset);
       
-      const countResult = await db.execute(sql`
-        SELECT COUNT(*) as count FROM users
-      `);
-      
+      const [{ count }] = await db
+        .select({ count: db.fn.count() })
+        .from(users);
+        
       return {
-        users: (usersResult.rows || []) as User[],
-        total: Number(countResult.rows?.[0]?.count || 0)
+        users: usersResult,
+        total: Number(count)
       };
     } catch (error) {
       console.error("Error getting users:", error);
       throw error;
     }
   }
+  
   async toggleUserActive(id: number): Promise<User | undefined> {
     try {
       const [user] = await db.select().from(users).where(eq(users.id, id));
@@ -564,8 +429,7 @@ export class DatabaseStorage implements IStorage {
       const items = await filteredQuery.limit(limit).offset(offset);
       
       // Build count query with same filters
-      let countQuery = db.select({ count: sql`count(*)` }).from(inventoryItems);
-
+      let countQuery = db.select({ count: db.fn.count() }).from(inventoryItems);
       const filteredCountQuery = applyFilters(countQuery);
       
       const [{ count }] = await filteredCountQuery;
@@ -746,71 +610,71 @@ export class DatabaseStorage implements IStorage {
         return filteredQuery;
       };
       
-// Apply filters to the main query
-const filteredQuery = applyFilters(baseQuery);
-const logs = await filteredQuery.limit(limit).offset(offset);
-
-// Build count query with same filters
-let countQuery = db.select({ count: sql`count(*)` }).from(auditLogs);
-const filteredCountQuery = applyFilters(countQuery);
-
-const [{ count }] = await filteredCountQuery;
-
-return {
-  logs,
-  total: Number(count)
-};
-} catch (error) {
-  console.error("Error getting audit logs:", error);
-  throw error;
-}
-}
-
-// Dashboard statistics
-async getDashboardStats(): Promise<{
-  totalItems: number;
-  lowStockCount: number;
-  recentlyAdded: number;
-  outOfStock: number;
-}> {
-  try {
-    // Get total items count
-    const [{ count: totalItems }] = await db
-      .select({ count: sql`count(*)` })
-      .from(inventoryItems);
-    
-    // Get low stock count
-    const [{ count: lowStockCount }] = await db
-      .select({ count: sql`count(*)` })
-      .from(inventoryItems)
-      .where(eq(inventoryItems.status, 'low_stock'));
-    
-    // Get out of stock count
-    const [{ count: outOfStock }] = await db
-      .select({ count: sql`count(*)` })
-      .from(inventoryItems)
-      .where(eq(inventoryItems.status, 'out_of_stock'));
-    
-    // Get recently added count (last 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
-    const [{ count: recentlyAdded }] = await db
-      .select({ count: sql`count(*)` })
-      .from(inventoryItems)
-      .where(gte(inventoryItems.createdAt, thirtyDaysAgo));
-    
-    return {
-      totalItems: Number(totalItems),
-      lowStockCount: Number(lowStockCount),
-      recentlyAdded: Number(recentlyAdded),
-      outOfStock: Number(outOfStock)
-    };
-  } catch (error) {
-    console.error("Error getting dashboard stats:", error);
-    throw error;
+      // Apply filters to the main query
+      const filteredQuery = applyFilters(baseQuery);
+      const logs = await filteredQuery.limit(limit).offset(offset);
+      
+      // Build count query with same filters
+      let countQuery = db.select({ count: db.fn.count() }).from(auditLogs);
+      const filteredCountQuery = applyFilters(countQuery);
+      
+      const [{ count }] = await filteredCountQuery;
+      
+      return {
+        logs,
+        total: Number(count)
+      };
+    } catch (error) {
+      console.error("Error getting audit logs:", error);
+      throw error;
+    }
   }
-}
+  
+  // Dashboard statistics
+  async getDashboardStats(): Promise<{
+    totalItems: number;
+    lowStockCount: number;
+    recentlyAdded: number;
+    outOfStock: number;
+  }> {
+    try {
+      // Get total items count
+      const [{ count: totalItems }] = await db
+        .select({ count: db.fn.count() })
+        .from(inventoryItems);
+      
+      // Get low stock count
+      const [{ count: lowStockCount }] = await db
+        .select({ count: db.fn.count() })
+        .from(inventoryItems)
+        .where(eq(inventoryItems.status, 'low_stock'));
+      
+      // Get out of stock count
+      const [{ count: outOfStock }] = await db
+        .select({ count: db.fn.count() })
+        .from(inventoryItems)
+        .where(eq(inventoryItems.status, 'out_of_stock'));
+      
+      // Get recently added count (last 30 days)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const [{ count: recentlyAdded }] = await db
+        .select({ count: db.fn.count() })
+        .from(inventoryItems)
+        .where(gte(inventoryItems.createdAt, thirtyDaysAgo));
+      
+      return {
+        totalItems: Number(totalItems),
+        lowStockCount: Number(lowStockCount),
+        recentlyAdded: Number(recentlyAdded),
+        outOfStock: Number(outOfStock)
+      };
+    } catch (error) {
+      console.error("Error getting dashboard stats:", error);
+      throw error;
+    }
+  }
   
   // Recent activity
   async getRecentActivity(limit = 5): Promise<AuditLog[]> {
@@ -857,59 +721,118 @@ export class MemStorage implements IStorage {
     
     // Seed some initial data
     setTimeout(() => {
-
+      this.seedInitialData();
     }, 0);
   }
+  
+  private async seedInitialData(): Promise<void> {
+    try {
+      // Import the hashPassword function
+      const { hashPassword } = await import('./utils/password');
+      
+      // Create admin user
+      this.createUser({
+        name: "Admin User",
+        username: "admin",
+        email: "admin@hospital.org",
+        password: await hashPassword("admin123"),
+        role: "admin",
+        department: "Administration",
+        active: true,
+        confirmPassword: "admin123"
+      });
+      
+      // Create staff user
+      this.createUser({
+        name: "Staff User",
+        username: "staff",
+        email: "staff@hospital.org",
+        password: await hashPassword("staff123"),
+        role: "staff",
+        department: "Emergency",
+        active: true,
+        confirmPassword: "staff123"
+      });
+    } catch (error) {
+      console.error("Error seeding initial data:", error);
+    }
+    
+    // Create departments
+    const emergency = await this.createDepartment({ name: "Emergency", description: "Emergency department" });
+    const surgery = await this.createDepartment({ name: "Surgery", description: "Surgery department" });
+     const pediatrics = await this.createDepartment({ name: "Pediatrics", description: "Pediatrics department" });
+    const cardiology = await this.createDepartment({ name: "Cardiology", description: "Cardiology department" });    
+    const general = await this.createDepartment({ name: "General", description: "General department" });
+
+    
+    // Create categories
+    const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
+    const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
+    const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
+    const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
+    
+    // Create inventory items
+    this.createInventoryItem({
+      itemId: "PPE-001",
+      name: "N95 Masks",
+      description: "N95 respirator masks",
+      departmentId: emergency.id,
+      categoryId: ppe.id,
+      currentStock: 25,
+      unit: "units",
+      threshold: 50
+    });
+    
+    this.createInventoryItem({
+      itemId: "PPE-002",
+      name: "Surgical Gloves (S)",
+      description: "Small surgical gloves",
+      departmentId: surgery.id,
+      categoryId: ppe.id,
+      currentStock: 10,
+      unit: "boxes",
+      threshold: 20
+    });
+    
+    this.createInventoryItem({
+      itemId: "MED-023",
+      name: "IV Saline Solution",
+      description: "Intravenous saline solution",
+      departmentId: general.id,
+      categoryId: pharmaceuticals.id,
+      currentStock: 30,
+      unit: "bags",
+      threshold: 40
+    });
+    
+    this.createInventoryItem({
+      itemId: "EQP-108",
+      name: "Blood Pressure Monitor",
+      description: "Digital blood pressure monitoring device",
+      departmentId: cardiology.id,
+      categoryId: equipment.id,
+      currentStock: 15,
+      unit: "units",
+      threshold: 5
+    });
+  }
 
   // User operations
-  // User operations
-async getUser(id: number): Promise<User | undefined> {
-  try {
-    const result = await db.execute(sql`
-      SELECT * FROM users WHERE id = ${id}
-    `);
-    
-    if (result.rows && result.rows.length > 0) {
-      return result.rows[0] as User;
-    }
-    return undefined;
-  } catch (error) {
-    console.error("Error getting user by id:", error);
-    throw error;
+  async getUser(id: number): Promise<User | undefined> {
+    return this.users.get(id);
   }
-}
-
-async getUserByUsername(username: string): Promise<User | undefined> {
-  try {
-    const result = await db.execute(sql`
-      SELECT * FROM users WHERE username = ${username}
-    `);
-    
-    if (result.rows && result.rows.length > 0) {
-      return result.rows[0] as User;
-    }
-    return undefined;
-  } catch (error) {
-    console.error("Error getting user by username:", error);
-    throw error; 
+  
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.username === username,
+    );
   }
-}
-
-async getUserByEmail(email: string): Promise<User | undefined> {
-  try {
-    const result = await db.execute(sql`
-      SELECT * FROM users WHERE email = ${email}
-    `);
-    
-    if (result.rows && result.rows.length > 0) {
-      return result.rows[0] as User;
-    }
-    return undefined;
-  } catch (error) {
-    console.error("Error getting user by email:", error);
-    throw error;
+  
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    return Array.from(this.users.values()).find(
+      (user) => user.email === email,
+    );
   }
-}
   
   async createUser(userData: InsertUser): Promise<User> {
     const id = this.userIdCounter++;

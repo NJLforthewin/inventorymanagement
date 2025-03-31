@@ -1,63 +1,97 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import { sql } from "drizzle-orm";
+import * as mssql from 'mssql';
+
+// Create a type extension for NodePgDatabase to fix TypeScript errors in VS Code
+declare module 'drizzle-orm/node-postgres' {
+  interface NodePgDatabase {
+    // Add the missing fn property that TypeScript complains about
+    fn: {
+      count: () => any;
+    };
+  }
+}
 const { Client } = pg;
+
+// Configuration for MSSQL connection
+const sqlConfig = {
+  user: process.env.SQL_USER || 'sa',
+  password: process.env.SQL_PASSWORD || 'sancija2256!',
+  database: process.env.SQL_DATABASE || 'HospitalInventory',
+  server: process.env.SQL_SERVER || 'localhost',
+  pool: {
+    max: 10,
+    min: 0,
+    idleTimeoutMillis: 30000
+  },
+  options: {
+    encrypt: true, // for azure
+    trustServerCertificate: true // change to false for production
+  }
+};
+
+// Check if SQLServer connection pool is working
+export async function testSqlConnection() {
+  try {
+    const pool = await mssql.connect(sqlConfig);
+    const result = await pool.request().query('SELECT 1 as value');
+    console.log('SQL Server connection successful');
+    return true;
+  } catch (err) {
+    console.error('Error connecting to SQL Server:', err);
+    return false;
+  }
+}
 
 // For use with Drizzle ORM
 export const client = new Client({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : true
+
+  host: process.env.PGHOST || 'localhost',
+  port: 5432, // Using the port you specified
+  user: process.env.PGUSER || 'postgres',
+  password: process.env.PGPASSWORD || 'postgres',
+  database: process.env.PGDATABASE || 'postgres',
+  ssl: false
 });
 
 // Connect the client
 export const connectToDb = async () => {
   try {
     await client.connect();
-    console.log("PostgreSQL database connected");
+    console.log("Postgres database connected");
   } catch (err) {
-    console.error("Failed to connect to PostgreSQL database:", err);
-    return false;
+    console.error("Failed to connect to database:", err);
+    process.exit(1);
   }
 };
 
 // Create Drizzle instance
 export const db = drizzle(client);
 
-// Export SQL for use with count() and other functions
-export { sql };
-
-// Test connection
-export async function testSqlConnection() {
+// Create mssql pool
+export const createMssqlPool = async () => {
   try {
-    await connectToDb();
-    const result = await client.query('SELECT NOW()');
-    console.log('PostgreSQL connection successful:', result.rows[0]);
-    return true;
+    return await mssql.connect(sqlConfig);
   } catch (err) {
-    console.error('Error connecting to PostgreSQL:', err);
-    return false;
+    console.error('Error creating SQL Server pool:', err);
+    throw err;
   }
-}
+};
 
-// Add this function to db.ts
-export async function initDb() {
+// Execute MSSQL query
+export const executeSqlQuery = async (query: string, params?: any[]) => {
+  const pool = await createMssqlPool();
   try {
-    await connectToDb();
-    console.log('Database initialized successfully');
-    return true;
-  } catch (error) {
-    console.error('Failed to initialize database:', error);
-    return false;
+    const request = pool.request();
+    
+    if (params) {
+      params.forEach((param, index) => {
+        request.input(`param${index}`, param);
+      });
+    }
+    
+    return await request.query(query);
+  } finally {
+    pool.close();
   }
-}
-
-// Execute SQL query
-export async function executeSqlQuery(query: string, params: any[] = []) {
-  try {
-    const result = await client.query(query, params);
-    return result.rows;
-  } catch (error) {
-    console.error("Error executing SQL query:", error);
-    throw error;
-  }
-}
+};

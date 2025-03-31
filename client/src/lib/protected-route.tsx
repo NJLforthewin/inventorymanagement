@@ -1,39 +1,47 @@
-// protected-route.tsx
-import React from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { Route, Redirect } from "wouter";
+import { Loader2 } from "lucide-react";
+import { Redirect, Route } from "wouter";
 
 interface ProtectedRouteProps {
   path: string;
-  component: React.ComponentType;
-  requiredRole?: 'admin' | 'staff';
+  component: () => React.JSX.Element;
+  adminOnly?: boolean;
 }
 
-export function ProtectedRoute({ path, component: Component, requiredRole }: ProtectedRouteProps) {
+export function ProtectedRoute({
+  path,
+  component: Component,
+  adminOnly = false,
+}: ProtectedRouteProps) {
   const { user, isLoading } = useAuth();
-  
+
   return (
-    <Route
-      path={path}
-      component={() => {
-        // Show loading state while checking authentication
+    <Route path={path}>
+      {() => {
         if (isLoading) {
-          return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+          return (
+            <div className="flex items-center justify-center min-h-screen">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          );
         }
-        
-        // Redirect to login if not authenticated
+
         if (!user) {
-          return <Redirect to="/login" />;
+          return <Redirect to="/auth" />;
         }
-        
-        // Check role requirements if specified
-        if (requiredRole && user.role !== requiredRole && user.role !== 'admin') {
-          return <Redirect to="/unauthorized" />;
+
+        if (adminOnly && user.role !== "admin") {
+          return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-4">
+              <h1 className="text-2xl font-bold text-red-600 mb-2">Access Denied</h1>
+              <p className="text-gray-600 mb-6">You don't have permission to access this page.</p>
+              <a href="/" className="text-primary hover:underline">Return to Dashboard</a>
+            </div>
+          );
         }
-        
-        // User is authenticated and has required role
+
         return <Component />;
       }}
-    />
+    </Route>
   );
 }

@@ -9,228 +9,14 @@ import {
   insertInventoryItemSchema,
   updateInventoryItemSchema,
   insertAuditLogSchema,
-  insertUserSchema,
-  users,
-  departments,
-  categories
+  insertUserSchema
 } from "@shared/schema";
-import { sql } from "drizzle-orm";
 import { ZodError, z } from "zod";
 import { fromZodError } from "zod-validation-error";
-import { db } from './db-postgres';  // Add this import
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Debug endpoint to check database status
-  app.get("/api/debug/db-status", async (req, res) => {
-    try {
-      // Check database connection
-      console.log('Database URL:', process.env.DATABASE_URL ? '[CONFIGURED]' : '[NOT CONFIGURED]');
-      
-      // Try to query the users table
-      const { users, total } = await storage.getUsers(1, 10);
-      console.log(`Found ${total} users in database`);
-      
-      // Check if tables exist by trying to query them
-      const departments = await storage.getDepartments();
-      console.log(`Found ${departments.length} departments in database`);
-      
-      // Return status
-      res.status(200).json({
-        databaseConnected: true,
-        usersCount: total,
-        departmentsCount: departments.length,
-        seedingNeeded: total === 0 || departments.length === 0
-      });
-    } catch (error: any) {
-      console.error('Database check error:', error);
-      res.status(500).json({
-        databaseConnected: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-
-  app.get("/api/debug/db-direct", async (req, res) => {
-    try {
-      // Test direct SQL query using the executeSqlQuery function
-      const result = await executeSqlQuery("SELECT COUNT(*) FROM users");
-      const usersCount = parseInt(result[0].count);
-      
-      res.status(200).json({
-        success: true,
-        usersCount: usersCount,
-        rawResult: result
-      });
-    } catch (error: unknown) {
-      console.error('Direct database query error:', error);
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : String(error)
-      });
-    }
-  });
-
-  // Debug endpoint to force database seeding
-  app.post("/api/debug/force-seed", async (req, res) => {
-    try {
-      console.log('Force seeding database...');
-      
-      // Import necessary functions
-      const { hashPassword } = await import('./utils/password');
-      
-      // Create admin user
-      const adminPassword = await hashPassword('admin123');
-      const staffPassword = await hashPassword('staff123');
-      
-      // Use direct SQL approach with db.execute
-      
-      // Insert users
-      await db.execute(sql`
-        INSERT INTO users (name, username, email, password, role, department, active, created_at)
-        VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
-        ON CONFLICT (username) DO NOTHING
-      `);
-      
-      await db.execute(sql`
-        INSERT INTO users (name, username, email, password, role, department, active, created_at)
-        VALUES ('Staff User', 'staff', 'staff@hospital.org', ${staffPassword}, 'staff', 'Emergency', true, NOW())
-        ON CONFLICT (username) DO NOTHING
-      `);
-      
-      // Insert departments
-      await db.execute(sql`
-        INSERT INTO departments (name, description, created_at)
-        VALUES 
-          ('Emergency', 'Emergency department', NOW()),
-          ('Surgery', 'Surgery department', NOW()),
-          ('Pediatrics', 'Pediatrics department', NOW()),
-          ('Cardiology', 'Cardiology department', NOW()),
-          ('General', 'General department', NOW())
-        ON CONFLICT (name) DO NOTHING
-      `);
-      
-      // Insert categories
-      await db.execute(sql`
-        INSERT INTO categories (name, description, created_at)
-        VALUES 
-          ('PPE', 'Personal Protective Equipment', NOW()),
-          ('Pharmaceuticals', 'Medicines and drugs', NOW()),
-          ('Equipment', 'Medical equipment', NOW()),
-          ('Supplies', 'General medical supplies', NOW())
-        ON CONFLICT (name) DO NOTHING
-      `);
-      
-      // Check if it worked
-      const usersResult = await db.select({ count: sql`count(*)` }).from(users);
-      const departmentsResult = await db.select({ count: sql`count(*)` }).from(departments);
-      
-      res.status(200).json({
-        success: true,
-        usersCount: Number(usersResult[0]?.count || 0),
-        departmentsCount: Number(departmentsResult[0]?.count || 0)
-      });
-    } catch (error: any) {
-      console.error('Force seed error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-
-  // Add a basic seeding endpoint that doesn't rely on the storage implementation
-  app.post("/api/debug/manual-seed", async (req, res) => {
-    try {
-      console.log('Manual seeding initiated...');
-      
-      // Import the hashPassword function
-      const { hashPassword } = await import('./utils/password');
-      
-      // Create admin user
-      const adminPassword = await hashPassword('admin123');
-      const staffPassword = await hashPassword('staff123');
-      
-      // Use db.execute with sql`` instead of db.insert
-      await db.execute(sql`
-        INSERT INTO users (name, username, email, password, role, department, active, created_at)
-        VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
-        ON CONFLICT (username) DO NOTHING
-      `);
-      
-      await db.execute(sql`
-        INSERT INTO users (name, username, email, password, role, department, active, created_at)
-        VALUES ('Staff User', 'staff', 'staff@hospital.org', ${staffPassword}, 'staff', 'Emergency', true, NOW())
-        ON CONFLICT (username) DO NOTHING
-      `);
-      
-      // Insert departments
-      await db.execute(sql`
-        INSERT INTO departments (name, description, created_at)
-        VALUES 
-          ('Emergency', 'Emergency department', NOW()),
-          ('Surgery', 'Surgery department', NOW()),
-          ('Pediatrics', 'Pediatrics department', NOW()),
-          ('Cardiology', 'Cardiology department', NOW()),
-          ('General', 'General department', NOW())
-        ON CONFLICT (name) DO NOTHING
-      `);
-      
-      // Insert categories
-      await db.execute(sql`
-        INSERT INTO categories (name, description, created_at)
-        VALUES 
-          ('PPE', 'Personal Protective Equipment', NOW()),
-          ('Pharmaceuticals', 'Medicines and drugs', NOW()),
-          ('Equipment', 'Medical equipment', NOW()),
-          ('Supplies', 'General medical supplies', NOW())
-        ON CONFLICT (name) DO NOTHING
-      `);
-      
-      // Check if it worked using sql count
-      const usersResult = await db.select({ count: sql`count(*)` }).from(users);
-      const departmentsResult = await db.select({ count: sql`count(*)` }).from(departments);
-      
-      res.status(200).json({
-        success: true,
-        usersCount: Number(usersResult[0]?.count || 0),
-        departmentsCount: Number(departmentsResult[0]?.count || 0)
-      });
-    } catch (error: any) {
-      console.error('Manual seed error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-
-  // Add this before the setupAuth(app) line in routes.ts
-app.get("/api/debug/basic-ping", (req, res) => {
-  res.status(200).json({
-    message: "Basic ping successful",
-    timestamp: new Date().toISOString()
-  });
-});
- // Add this before the setupAuth(app) line in routes.ts
-app.get("/api/debug/db-basic", async (req, res) => {
-  try {
-    const result = await executeSqlQuery("SELECT NOW() as current_time");
-    
-    res.status(200).json({
-      success: true,
-      dbResponding: true,
-      result: result,
-      message: "Database connection working"
-    });
-  } catch (error: any) {
-    console.error('Database basic check error:', error);
-    res.status(500).json({
-      success: false,
-      dbResponding: false,
-      error: error.message || String(error)
-    });
-  }
-});
+  // Setup authentication
+  setupAuth(app);
 
   // Error handling middleware for Zod validation errors
   const handleZodError = (err: unknown, req: Request, res: Response, next: NextFunction) => {
@@ -243,326 +29,16 @@ app.get("/api/debug/db-basic", async (req, res) => {
     }
     next(err);
   };
-  
 
-  app.post("/api/debug/force-user-create", async (req, res) => {
-    try {
-      console.log('Forcing admin user creation with direct SQL...');
-      
-      // Import the hashPassword function
-      const { hashPassword } = await import('./utils/password');
-      
-      // Create admin password
-      const adminPassword = await hashPassword('admin123');
-      console.log('Generated hashed password');
-      
-      // First delete any existing admin user to avoid conflicts
-      await db.execute(sql`DELETE FROM users WHERE username = 'admin'`);
-      console.log('Cleaned up any existing admin user');
-      
-      // Try direct SQL insertion
-      try {
-        console.log('Inserting new admin user...');
-        const insertResult = await db.execute(sql`
-          INSERT INTO users (name, username, email, password, role, department, active, created_at)
-          VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
-          RETURNING id, username, role
-        `);
-        
-        console.log('Insert result:', insertResult);
-        
-        // Also create a staff user
-        const staffPassword = await hashPassword('staff123');
-        await db.execute(sql`
-          INSERT INTO users (name, username, email, password, role, department, active, created_at)
-          VALUES ('Staff User', 'staff', 'staff@hospital.org', ${staffPassword}, 'staff', 'Emergency', true, NOW())
-          RETURNING id
-        `);
-        
-        // Check users table with direct query
-        const userCheck = await db.execute(sql`SELECT * FROM users`);
-        console.log('User count from direct query:', userCheck.length);
-        
-        // Also check with storage method for comparison
-        const storageUser = await storage.getUserByUsername('admin');
-        console.log('Storage getUserByUsername result:', storageUser ? 'Found user' : 'User not found');
-        
-        res.status(200).json({
-          success: true,
-          usersCreated: true,
-          userCount: userCheck.length,
-          directQueryFound: userCheck.length > 0,
-          storageMethodFound: !!storageUser,
-          firstUser: userCheck.length > 0 ? {
-            id: userCheck[0].id,
-            username: userCheck[0].username,
-            role: userCheck[0].role
-          } : null
-        });
-      } catch (sqlError) {
-        console.error('SQL insertion error:', sqlError);
-        res.status(500).json({
-          success: false,
-          error: String(sqlError)
-        });
-      }
-    } catch (error: any) {
-      console.error('Force user create error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-  
-  // Debug endpoint to test direct SQL query vs storage method
-  app.get("/api/debug/check-users-direct", async (req, res) => {
-    try {
-      // Direct SQL query to check users
-      const directUsers = await db.execute(sql`SELECT * FROM users`);
-      console.log('Direct SQL users count:', directUsers.length);
-      
-      // Storage method to check users
-      const { users, total } = await storage.getUsers();
-      console.log('Storage method users count:', total);
-      
-      // Check admin user specifically
-      const adminDirect = await db.execute(sql`SELECT * FROM users WHERE username = 'admin'`);
-      const adminStorage = await storage.getUserByUsername('admin');
-      
-      res.status(200).json({
-        directQuery: {
-          userCount: directUsers.length,
-          adminFound: adminDirect.length > 0,
-          adminUser: adminDirect.length > 0 ? {
-            id: adminDirect[0].id,
-            username: adminDirect[0].username,
-            role: adminDirect[0].role
-          } : null
-        },
-        storageMethod: {
-          userCount: total,
-          adminFound: !!adminStorage,
-          adminUser: adminStorage ? {
-            id: adminStorage.id,
-            username: adminStorage.username,
-            role: adminStorage.role
-          } : null
-        }
-      });
-    } catch (error: any) {
-      console.error('Check users direct error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-
-  app.post("/api/debug/create-tables", async (req, res) => {
-    try {
-      console.log('Creating database tables...');
-      
-      // Create users table
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS users (
-          id SERIAL PRIMARY KEY,
-          name TEXT NOT NULL,
-          username TEXT UNIQUE NOT NULL,
-          email TEXT UNIQUE NOT NULL,
-          password TEXT NOT NULL,
-          role TEXT NOT NULL,
-          department TEXT,
-          active BOOLEAN DEFAULT true,
-          last_login TIMESTAMP,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-      
-      // Create departments table
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS departments (
-          id SERIAL PRIMARY KEY,
-          name TEXT UNIQUE NOT NULL,
-          description TEXT,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-      
-      // Create categories table
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS categories (
-          id SERIAL PRIMARY KEY,
-          name TEXT UNIQUE NOT NULL,
-          description TEXT,
-          created_at TIMESTAMP DEFAULT NOW()
-        )
-      `);
-      
-      // Create inventory_items table
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS inventory_items (
-          id SERIAL PRIMARY KEY,
-          item_id TEXT UNIQUE NOT NULL,
-          name TEXT NOT NULL,
-          description TEXT,
-          department_id INTEGER NOT NULL,
-          category_id INTEGER NOT NULL,
-          current_stock INTEGER NOT NULL DEFAULT 0,
-          unit TEXT NOT NULL,
-          threshold INTEGER NOT NULL,
-          status TEXT NOT NULL DEFAULT 'in_stock',
-          created_at TIMESTAMP DEFAULT NOW(),
-          updated_at TIMESTAMP DEFAULT NOW(),
-          FOREIGN KEY (department_id) REFERENCES departments(id),
-          FOREIGN KEY (category_id) REFERENCES categories(id)
-        )
-      `);
-      
-      // Create audit_logs table
-      await db.execute(sql`
-        CREATE TABLE IF NOT EXISTS audit_logs (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER NOT NULL,
-          activity_type TEXT NOT NULL,
-          item_id INTEGER,
-          details TEXT NOT NULL,
-          created_at TIMESTAMP DEFAULT NOW(),
-          FOREIGN KEY (user_id) REFERENCES users(id),
-          FOREIGN KEY (item_id) REFERENCES inventory_items(id)
-        )
-      `);
-      
-      res.status(200).json({
-        success: true,
-        message: "Database tables created successfully"
-      });
-    } catch (error: any) {
-      console.error('Error creating tables:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-
-
-  app.get("/api/debug/check-admin", async (req, res) => {
-    try {
-      const user = await storage.getUserByUsername('admin');
-      
-      res.status(200).json({
-        userExists: !!user,
-        username: user ? user.username : null,
-        role: user ? user.role : null,
-      });
-    } catch (error: any) {
-      console.error('Admin check error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-  
-  app.post("/api/debug/recreate-admin", async (req, res) => {
-    try {
-      // Import password utils
-      const { hashPassword } = await import('./utils/password');
-      
-      // First check if user exists
-      const existingUser = await storage.getUserByUsername('admin');
-      
-      if (existingUser) {
-        // Update admin password
-        const adminPassword = await hashPassword('admin123');
-        
-        // Use SQL to update
-        await db.execute(sql`
-          UPDATE users 
-          SET password = ${adminPassword} 
-          WHERE username = 'admin'
-        `);
-        
-        console.log('Admin password updated');
-      } else {
-        // Create admin user
-        const adminPassword = await hashPassword('admin123');
-        
-        // Use SQL to insert
-        await db.execute(sql`
-          INSERT INTO users (name, username, email, password, role, department, active, created_at)
-          VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
-        `);
-        
-        console.log('Admin user created');
-      }
-      
-      // Verify the user exists now
-      const user = await storage.getUserByUsername('admin');
-      
-      res.status(200).json({
-        success: true,
-        userExists: !!user
-      });
-    } catch (error: any) {
-      console.error('Create admin error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-
-  app.get("/api/debug/check-tables", async (req, res) => {
-    try {
-      // Try to query if tables exist
-      const results = await executeSqlQuery(`
-        SELECT table_name 
-        FROM information_schema.tables 
-        WHERE table_schema='public'
-      `);
-      const userTableExists = Array.isArray(results) 
-         ? results.some(r => r.table_name === 'users')
-          : false;
-
-    } catch (error: any) {
-      console.error('Table check error:', error);
-      res.status(500).json({
-        success: false,
-        error: error.message || String(error)
-      });
-    }
-  });
-
-  app.get("/api/debug/db-ping", async (req, res) => {
-    try {
-      // Use a very simple query with raw SQL
-      const result = await executeSqlQuery("SELECT NOW() as current_time");
-      
-      res.status(200).json({
-        success: true,
-        dbResponding: true,
-        result: result,
-        message: "Database connection working"
-      });
-    } catch (error: any) {
-      console.error('Database ping error:', error);
-      res.status(500).json({
-        success: false,
-        dbResponding: false,
-        error: error.message || String(error),
-        stack: process.env.NODE_ENV !== 'production' ? error.stack : undefined
-      });
-    }
-  });
-
+  // Log requests to /api routes
   app.use('/api', (req, res, next) => {
     console.log(`${req.method} ${req.path}`);
     next();
   });
 
+  // API routes
   
+  // Dashboard stats
   app.get("/api/dashboard/stats", isAuthenticated, async (req, res, next) => {
     try {
       const stats = await storage.getDashboardStats();
@@ -591,6 +67,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
     }
   });
   
+  // Department routes
   app.get("/api/departments", isAuthenticated, async (req, res, next) => {
     try {
       const departments = await storage.getDepartments();
@@ -620,6 +97,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
       const validatedData = insertDepartmentSchema.parse(req.body);
       const department = await storage.createDepartment(validatedData);
       
+      // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "created",
@@ -643,6 +121,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
         return res.status(404).json({ message: "Department not found" });
       }
       
+      // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "updated",
@@ -667,6 +146,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
       const deleted = await storage.deleteDepartment(id);
       
       if (deleted) {
+        // Create audit log
         await storage.createAuditLog({
           userId: req.user!.id,
           activityType: "deleted",
@@ -680,6 +160,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
     }
   });
   
+  // Category routes
   app.get("/api/categories", isAuthenticated, async (req, res, next) => {
     try {
       const categories = await storage.getCategories();
@@ -709,6 +190,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
       const validatedData = insertCategorySchema.parse(req.body);
       const category = await storage.createCategory(validatedData);
       
+      // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "created",
@@ -956,19 +438,20 @@ app.get("/api/debug/db-basic", async (req, res) => {
       // Import the hashPassword function
       const { hashPassword } = await import('./utils/password');
       
+      // Hash the password before storing
       const user = await storage.createUser({
         ...validatedData,
-        password: await hashPassword(validatedData.password),
+        password: await hashPassword(validatedData.password)
       });
       
       // Create audit log
       await storage.createAuditLog({
         userId: req.user!.id,
         activityType: "created",
-        details: `Created user: ${user.username}`
+        details: `Created user: ${user.username} (${user.role})`
       });
       
-      // Don't send the password to the client
+      // Don't send the password back
       const { password, ...userWithoutPassword } = user;
       res.status(201).json(userWithoutPassword);
     } catch (error) {
@@ -976,41 +459,32 @@ app.get("/api/debug/db-basic", async (req, res) => {
     }
   });
   
-  app.get("/api/users/:id", isAdmin, async (req, res, next) => {
-    try {
-      const id = parseInt(req.params.id);
-      const user = await storage.getUser(id);
-      
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-      
-      // Don't send the password to the client
-      const { password, ...userWithoutPassword } = user;
-      res.json(userWithoutPassword);
-    } catch (error) {
-      next(error);
-    }
-  });
-  
   app.put("/api/users/:id", isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
+      // Parse the data using z.object to validate only the fields we want to update
+      const updateUserSchema = z.object({
+        name: z.string().optional(),
+        username: z.string().optional(),
+        email: z.string().email().optional(),
+        role: z.enum(['admin', 'staff']).optional(),
+        department: z.string().nullable().optional(),
+        active: z.boolean().optional()
+      });
+      const userData = updateUserSchema.parse(req.body);
       
-      // Use a simpler approach - directly parse without trying to use partial()
-      const userData = req.body;
-      
-      // If password is being updated, hash it
-      if (userData.password) {
-        // Import the hashPassword function
-        const { hashPassword } = await import('./utils/password');
-        
-        userData.password = await hashPassword(userData.password);
+      if (userData.username) {
+        const existingUser = await storage.getUserByUsername(userData.username);
+        if (existingUser && existingUser.id !== id) {
+          return res.status(400).json({ message: "Username already exists" });
+        }
       }
       
-      // Delete confirmPassword if present
-      if ('confirmPassword' in userData) {
-        delete userData.confirmPassword;
+      if (userData.email) {
+        const existingEmail = await storage.getUserByEmail(userData.email);
+        if (existingEmail && existingEmail.id !== id) {
+          return res.status(400).json({ message: "Email already exists" });
+        }
       }
       
       const user = await storage.updateUser(id, userData);
@@ -1026,17 +500,22 @@ app.get("/api/debug/db-basic", async (req, res) => {
         details: `Updated user: ${user.username}`
       });
       
-      // Don't send the password to the client
+      // Don't send the password back
       const { password, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
-      next(error);
+      handleZodError(error, req, res, next);
     }
   });
   
-  app.post("/api/users/:id/toggle-active", isAdmin, async (req, res, next) => {
+  app.put("/api/users/:id/toggle-active", isAdmin, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
+      
+      // Prevent deactivating yourself
+      if (id === req.user!.id) {
+        return res.status(400).json({ message: "Cannot deactivate your own account" });
+      }
       
       const user = await storage.toggleUserActive(id);
       
@@ -1051,7 +530,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
         details: `${user.active ? 'Activated' : 'Deactivated'} user: ${user.username}`
       });
       
-      // Don't send the password to the client
+      // Don't send the password back
       const { password, ...userWithoutPassword } = user;
       res.json(userWithoutPassword);
     } catch (error) {
@@ -1059,7 +538,7 @@ app.get("/api/debug/db-basic", async (req, res) => {
     }
   });
   
-  // Audit logs (admin only)
+  // Audit log routes (admin only)
   app.get("/api/audit-logs", isAdmin, async (req, res, next) => {
     try {
       const page = req.query.page ? parseInt(req.query.page as string) : 1;
@@ -1069,9 +548,9 @@ app.get("/api/debug/db-basic", async (req, res) => {
       
       if (req.query.userId) filters.userId = parseInt(req.query.userId as string);
       if (req.query.itemId) filters.itemId = parseInt(req.query.itemId as string);
+      if (req.query.activityType) filters.activityType = req.query.activityType;
       if (req.query.startDate) filters.startDate = new Date(req.query.startDate as string);
       if (req.query.endDate) filters.endDate = new Date(req.query.endDate as string);
-      if (req.query.activityType) filters.activityType = req.query.activityType;
       
       const { logs, total } = await storage.getAuditLogs(page, limit, filters);
       
@@ -1086,9 +565,62 @@ app.get("/api/debug/db-basic", async (req, res) => {
       next(error);
     }
   });
-  setupAuth(app);
-  // Create server
-  const server = createServer(app);
   
-  return server;
+  // SQL Server connection test endpoint
+  app.get("/api/sql-connection-test", isAdmin, async (req, res, next) => {
+    try {
+      const isConnected = await testSqlConnection();
+      if (isConnected) {
+        res.json({ 
+          status: "success", 
+          message: "Successfully connected to SQL Server"
+        });
+      } else {
+        res.status(500).json({ 
+          status: "error", 
+          message: "Failed to connect to SQL Server"
+        });
+      }
+    } catch (error) {
+      console.error("SQL Server connection test error:", error);
+      res.status(500).json({ 
+        status: "error", 
+        message: "An error occurred while testing the SQL Server connection",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+  
+  // SQL Server query execution endpoint
+  app.post("/api/sql-query", isAdmin, async (req, res, next) => {
+    try {
+      const { query, params } = req.body;
+      
+      if (!query || typeof query !== 'string') {
+        return res.status(400).json({ 
+          status: "error", 
+          message: "Query is required and must be a string" 
+        });
+      }
+      
+      // Execute the query
+      const result = await executeSqlQuery(query, params);
+      res.json({ 
+        status: "success", 
+        data: result 
+      });
+    } catch (error) {
+      console.error("SQL query execution error:", error);
+      res.status(500).json({ 
+        status: "error", 
+        message: "An error occurred while executing the SQL query",
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  });
+
+  console.log("Creating HTTP server...");
+  const httpServer = createServer(app);
+  console.log("HTTP server created successfully");
+  return httpServer;
 }

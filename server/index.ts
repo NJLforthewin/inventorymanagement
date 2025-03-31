@@ -1,17 +1,8 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import cors from "cors"; // Add this import
-import 'dotenv/config';
 
 const app = express();
-
-// Add CORS middleware with proper configuration
-app.use(cors({
-  origin: ["https://stockwell-app.onrender.com", "http://localhost:3000", "http://localhost:5000"],
-  credentials: true
-}));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -51,12 +42,9 @@ app.use((req, res, next) => {
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
-    
-    // Log the error instead of throwing it
-    console.error(`Error [${status}]:`, err);
-    
-    // Send response to client
+
     res.status(status).json({ message });
+    throw err;
   });
 
   // importantly only setup vite in development and after
@@ -68,8 +56,10 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // Update port to use environment variable for Render
-  const port = process.env.PORT || 5000;
+  // ALWAYS serve the app on port 5000
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
+  const port = 5000;
   server.listen({
     port,
     host: "0.0.0.0",
