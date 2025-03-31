@@ -6,7 +6,7 @@ import {
   UseMutationResult,
 } from "@tanstack/react-query";
 import { insertUserSchema, User as SelectUser, InsertUser, LoginUser } from "@shared/schema";
-import { getQueryFn, apiRequest, queryClient, apiClient, authAPI } from "../lib/queryClient";
+import { getQueryFn, apiRequest, queryClient, apiClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 type AuthContextType = {

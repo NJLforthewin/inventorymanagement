@@ -2,6 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { initDb } from './db-postgres';
 import { setupAuth } from './auth';
@@ -412,16 +413,55 @@ const httpServer = app.listen(port, "0.0.0.0", () => {
     // Serve static files for production
     if (process.env.NODE_ENV === 'production') {
       log('Setting up static file serving for production');
-      // Correctly serve static files in production
+      // Check if the public directory exists before attempting to serve files
       const publicPath = path.resolve(__dirname, '..', 'public');
-      app.use(express.static(publicPath));
       
-      // Serve index.html for any non-API routes to support client-side routing
-      app.get('*', (req, res) => {
-        // Skip API routes
-        if (req.path.startsWith('/api')) return;
-        res.sendFile(path.join(publicPath, 'index.html'));
-      });
+      if (fs.existsSync(publicPath)) {
+        app.use(express.static(publicPath));
+        
+        // Serve index.html for any non-API routes to support client-side routing
+        app.get('*', (req, res) => {
+          // Skip API routes
+          if (req.path.startsWith('/api')) return;
+          res.sendFile(path.join(publicPath, 'index.html'));
+        });
+      } else {
+        log('Public directory not found, skipping static file serving');
+        
+        // Add a route to handle non-API requests with a simple message
+        app.get('*', (req, res, next) => {
+          if (!req.path.startsWith('/api')) {
+            res.status(200).send(`
+              <html>
+                <head>
+                  <title>Stock Well API</title>
+                  <style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
+                    h1 { color: #2563eb; }
+                    p { margin-bottom: 16px; }
+                    code { background: #f1f5f9; padding: 2px 4px; border-radius: 4px; }
+                  </style>
+                </head>
+                <body>
+                  <h1>Stock Well API Server</h1>
+                  <p>This is the API server for Stock Well. The frontend application is hosted separately at: 
+                    <a href="https://stockwell-app.onrender.com">https://stockwell-app.onrender.com</a>
+                  </p>
+                  <p>Available API endpoints:</p>
+                  <ul>
+                    <li><code>GET /api/debug/db-test</code> - Test database connection</li>
+                    <li><code>GET /api/check-users</code> - List users</li>
+                    <li><code>POST /api/direct-login</code> - Login endpoint</li>
+                    <li><code>GET /api/direct-user</code> - Get current user</li>
+                  </ul>
+                </body>
+              </html>
+            `);
+          } else {
+            next();
+          }
+        });
+      }
     }
   } catch (error) {
     log(`Fatal error during server initialization: ${error}`, "error");
