@@ -8,7 +8,7 @@ const app = express();
 
 // Add CORS middleware with proper configuration
 app.use(cors({
-  origin: ["https://stockwell.netlify.app", "http://localhost:3000", "http://localhost:5000"],
+  origin: ["https://stockwell-app.onrender.com", "http://localhost:3000", "http://localhost:5000"],
   credentials: true
 }));
 
