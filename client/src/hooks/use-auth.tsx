@@ -1,5 +1,5 @@
 // use-auth.tsx
-import { createContext, ReactNode, useContext } from "react";
+import { createContext, ReactNode, useContext, useEffect } from "react";
 import {
   useQuery,
   useMutation,
@@ -8,6 +8,7 @@ import {
 import { insertUserSchema, User as SelectUser, InsertUser, LoginUser } from "@shared/schema";
 import { getQueryFn, apiRequest, queryClient, apiClient } from "../lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
 
 type AuthContextType = {
   user: SelectUser | null;
@@ -22,6 +23,8 @@ export const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
+  const [location, setLocation] = useLocation();
+  
   const {
     data: user,
     error,
@@ -35,15 +38,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return response.data;
       } catch (error) {
         console.log('Standard user endpoint failed, trying direct user');
-        // Fall back to the direct endpoint
-        const directResponse = await apiClient.get('/direct-user');
-        return directResponse.data.user;
+        try {
+          // Fall back to the direct endpoint
+          const directResponse = await apiClient.get('/direct-user');
+          if (directResponse.data.success && directResponse.data.user) {
+            return directResponse.data.user;
+          }
+          throw new Error('Not authenticated');
+        } catch (directError) {
+          console.log('Direct user endpoint failed');
+          throw new Error('Not authenticated');
+        }
       }
     },
     retry: false,
     staleTime: Infinity,
     refetchOnWindowFocus: false
   });
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isLoading && !user && location !== '/login' && location !== '/register') {
+      console.log('User not authenticated, redirecting to login');
+      setLocation('/login');
+    }
+  }, [user, isLoading, location, setLocation]);
 
   const loginMutation = useMutation({
     mutationFn: async (credentials: LoginUser) => {
@@ -56,7 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('Standard login failed, trying direct login');
         // If standard login fails, try direct login
         const directResponse = await apiClient.post('/direct-login', credentials);
-        return directResponse.data.user;
+        if (directResponse.data.success && directResponse.data.user) {
+          return directResponse.data.user;
+        }
+        throw new Error('Login failed');
       }
     },
     onSuccess: (user: Omit<SelectUser, "password">) => {
@@ -66,11 +88,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: `Welcome back, ${user.name}!`,
         variant: "default",
       });
+      setLocation('/dashboard');
     },
     onError: (error: Error) => {
       toast({
         title: "Login failed",
-        description: error.message,
+        description: error.message || 'Invalid username or password',
         variant: "destructive",
       });
     },
@@ -88,6 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: `Welcome, ${user.name}!`,
         variant: "default",
       });
+      setLocation('/dashboard');
     },
     onError: (error: Error) => {
       toast({
@@ -100,7 +124,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logoutMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("POST", "/api/logout");
+      try {
+        // Try standard logout
+        await apiRequest("POST", "/api/logout");
+      } catch (error) {
+        console.log('Standard logout failed, clearing cookies manually');
+        // Clear all cookies as fallback
+        document.cookie.split(";").forEach((c) => {
+          document.cookie = c
+            .replace(/^ +/, "")
+            .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+        });
+      }
     },
     onSuccess: () => {
       queryClient.setQueryData(["/api/user"], null);
@@ -110,6 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: "You have been successfully logged out.",
         variant: "default",
       });
+      setLocation('/login');
     },
     onError: (error: Error) => {
       toast({
@@ -117,6 +153,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         description: error.message,
         variant: "destructive",
       });
+      // Force logout anyway
+      queryClient.setQueryData(["/api/user"], null);
+      setLocation('/login');
     },
   });
 
