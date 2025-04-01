@@ -50,11 +50,19 @@ export default function InventoryPage() {
   // Fetch departments for mapping names
   const { data: departments } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/departments");
+      return response.json();
+    }
   });
 
   // Fetch categories for mapping names
   const { data: categories } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/categories");
+      return response.json();
+    }
   });
 
   // Fetch inventory items with pagination and filters
@@ -68,7 +76,8 @@ export default function InventoryPage() {
       if (filters.status) url += `&status=${filters.status}`;
       if (filters.search) url += `&search=${encodeURIComponent(filters.search)}`;
       
-      return (await apiRequest("GET", url)).json();
+      const response = await apiRequest("GET", url);
+      return response.json();
     },
   });
 
@@ -98,7 +107,8 @@ export default function InventoryPage() {
   // Mutation for updating stock
   const updateStockMutation = useMutation({
     mutationFn: async ({ id, quantity }: { id: number, quantity: number }) => {
-      return (await apiRequest("POST", `/api/inventory/${id}/stock`, { quantity })).json();
+      const response = await apiRequest("POST", `/api/inventory/${id}/stock`, { quantity });
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
