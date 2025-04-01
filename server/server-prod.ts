@@ -47,7 +47,6 @@ app.set("trust proxy", 1);
 // CORS middleware with expanded configuration
 app.use(cors({
   origin: [
-    "https://stockwell-app.onrender.com",
     "https://stockwell.netlify.app", 
     "http://localhost:3000", 
     "http://localhost:5000", 
@@ -447,7 +446,7 @@ const httpServer = app.listen(port, "0.0.0.0", () => {
                 <body>
                   <h1>Stock Well API Server</h1>
                   <p>This is the API server for Stock Well. The frontend application is hosted separately at: 
-                    <a href="https://stockwell-app.onrender.com">https://stockwell-app.onrender.com</a>
+                    <a href="https://stockwell.netlify.app">https://stockwell.netlify.app</a>
                   </p>
                   <p>Available API endpoints:</p>
                   <ul>
