@@ -68,7 +68,7 @@ export default function InventoryPage() {
       if (filters.status) url += `&status=${filters.status}`;
       if (filters.search) url += `&search=${encodeURIComponent(filters.search)}`;
       
-      return (await fetch(url)).json();
+      return (await apiRequest("GET", url)).json();
     },
   });
 
@@ -202,7 +202,7 @@ export default function InventoryPage() {
     {
       header: "Last Updated",
       accessorKey: "updatedAt" as keyof InventoryItem,
-      cell: (row: InventoryItem) => new Date(row.updatedAt).toLocaleDateString()
+      cell: (row: InventoryItem) => row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : "N/A"
     },
     {
       header: "Actions",

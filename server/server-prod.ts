@@ -97,6 +97,8 @@ app.use((req, res, next) => {
         logLine += ` :: ${respStr.length > 100 ? respStr.slice(0, 100) + '...' : respStr}`;
       }
 
+      
+
       log(logLine);
       
       // Log response headers for debugging
