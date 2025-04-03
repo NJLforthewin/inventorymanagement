@@ -4,8 +4,8 @@ import {
   type Category, type InsertCategory, type InventoryItem, type InsertInventoryItem,
   type UpdateInventoryItem, type AuditLog, type InsertAuditLog
 } from "@shared/schema";
-import { eq, and, like, gte, lte, desc, inArray } from "drizzle-orm";
-import { db, executeSqlQuery } from "./db";
+import { eq, and, like, gte, lte, desc, inArray, lt, gt, isNotNull, asc, or, count } 
+from "drizzle-orm";import { db, executeSqlQuery } from "./db";
 import session from "express-session";
 import createMemoryStore from "memorystore";
 import * as mssql from 'mssql';
@@ -55,11 +55,14 @@ export interface IStorage {
       search?: string;
     }
   ): Promise<{ items: InventoryItem[], total: number }>;
+  getOutOfStockItems(): Promise<InventoryItem[]>;
   getLowStockItems(): Promise<InventoryItem[]>;
   createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem>;
   updateInventoryItem(id: number, item: UpdateInventoryItem): Promise<InventoryItem | undefined>;
   updateInventoryStock(id: number, quantity: number): Promise<InventoryItem | undefined>;
   deleteInventoryItem(id: number): Promise<boolean>;
+  getSoonToExpireItems(): Promise<InventoryItem[]>;
+  getCriticalExpirationItems(): Promise<InventoryItem[]>;
   
   // Audit log operations
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
@@ -81,6 +84,7 @@ export interface IStorage {
     lowStockCount: number;
     recentlyAdded: number;
     outOfStock: number;
+    expiringSoon: number;
   }>;
   
   // Recent activity
@@ -359,6 +363,25 @@ export class DatabaseStorage implements IStorage {
       throw error;
     }
   }
+
+  async getCriticalExpirationItems(): Promise<InventoryItem[]> {
+    const today = new Date();
+    const twoWeeksFromNow = new Date();
+    twoWeeksFromNow.setDate(today.getDate() + 14); // 2 weeks
+    
+    const items = await db.select()
+      .from(inventoryItems)
+      .where(
+        and(
+          isNotNull(inventoryItems.expirationDate),
+          gt(inventoryItems.expirationDate, today),
+          lte(inventoryItems.expirationDate, twoWeeksFromNow)
+        )
+      )
+      .orderBy(inventoryItems.expirationDate);
+    
+    return items;
+  }
   
   async deleteCategory(id: number): Promise<boolean> {
     try {
@@ -446,71 +469,155 @@ export class DatabaseStorage implements IStorage {
   
   async getLowStockItems(): Promise<InventoryItem[]> {
     try {
-      return await db
+      const items = await db
         .select()
         .from(inventoryItems)
         .where(
-          inArray(inventoryItems.status, ['low_stock', 'out_of_stock'])
-        );
+          and(
+            lt(inventoryItems.currentStock, inventoryItems.threshold),
+            gt(inventoryItems.currentStock, 0) // This excludes items with 0 quantity
+          )
+        )
+        .orderBy(desc(inventoryItems.updatedAt))
+        .limit(5);
+      
+      return items;
     } catch (error) {
       console.error("Error getting low stock items:", error);
       throw error;
     }
   }
+
+// For DatabaseStorage class
+async getOutOfStockItems(): Promise<InventoryItem[]> {
+  try {
+    // Use currentStock instead of quantity
+    const items = await db
+      .select()
+      .from(inventoryItems)
+      .where(eq(inventoryItems.currentStock, 0))
+      .orderBy(desc(inventoryItems.updatedAt))
+      .limit(5);
+    
+    return items;
+  } catch (error) {
+    console.error("Error getting out of stock items:", error);
+    throw error;
+  }
+}
   
-  async createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem> {
-    try {
-      // Determine status based on quantity and threshold - add non-null assertions
-      const status = item.currentStock === 0 
+
+async getSoonToExpireItems(): Promise<InventoryItem[]> {
+  try {
+    // Get items expiring in the next 30 days
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    const today = new Date();
+    
+    const items = await db
+      .select()
+      .from(inventoryItems)
+      .where(
+        and(
+          isNotNull(inventoryItems.expirationDate),
+          lte(inventoryItems.expirationDate, thirtyDaysFromNow),
+          gt(inventoryItems.expirationDate, today)
+        )
+      )
+      .orderBy(asc(inventoryItems.expirationDate))
+      .limit(5);
+    
+    return items;
+  } catch (error) {
+    console.error("Error getting soon to expire items:", error);
+    throw error;
+  }
+}
+
+// Method to create an inventory item
+async createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem> {
+  try {
+    // Determine status based on quantity and threshold
+    // Fix: Use item, not itemData (variable name mismatch)
+    const currentStock = item.currentStock ?? 0; // Use nullish coalescing
+    const threshold = item.threshold ?? 10; // Use nullish coalescing
+    
+    const status = currentStock === 0 
+      ? 'out_of_stock' 
+      : currentStock <= threshold 
+        ? 'low_stock' 
+        : 'in_stock';
+    
+    // Convert expirationDate string to Date object if it exists
+    let expirationDate = null; // Use null as default
+    if (item.expirationDate && item.expirationDate.trim() !== '') {
+      expirationDate = new Date(item.expirationDate);
+    }
+    
+    // Create the item
+    const [createdItem] = await db.insert(inventoryItems).values({
+      itemId: item.itemId,
+      name: item.name,
+      description: item.description || null,
+      departmentId: item.departmentId,
+      categoryId: item.categoryId,
+      currentStock: currentStock,
+      unit: item.unit,
+      threshold: threshold,
+      status: status,
+      expirationDate: expirationDate
+    }).returning();
+    
+    return createdItem;
+  } catch (error) {
+    console.error("Error creating inventory item:", error);
+    throw error;
+  }
+}
+
+// Method to update an inventory item
+async updateInventoryItem(id: number, item: UpdateInventoryItem): Promise<InventoryItem | undefined> {
+  try {
+    // Prepare update data
+    const updateData: any = { ...item, updatedAt: new Date() };
+    
+    // Handle status if currentStock is provided
+    if (typeof item.currentStock !== 'undefined' && typeof item.threshold !== 'undefined') {
+      updateData.status = item.currentStock === 0 
         ? 'out_of_stock' 
-        : item.currentStock! <= item.threshold! 
-          ? 'low_stock' 
-          : 'in_stock';
-      
-      const [createdItem] = await db
-        .insert(inventoryItems)
-        .values({ ...item, status: status as any })
-        .returning();
-      
-      return createdItem;
-    } catch (error) {
-      console.error("Error creating inventory item:", error);
-      throw error;
-    }
-  }
-  
-  async updateInventoryItem(id: number, itemData: UpdateInventoryItem): Promise<InventoryItem | undefined> {
-    try {
-      const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, id));
-      if (!item) return undefined;
-      
-      // Determine new status if stock or threshold changed
-      let newStatus = item.status;
-      
-      if ('currentStock' in itemData || 'threshold' in itemData) {
-        const newStock = itemData.currentStock ?? item.currentStock;
-        const newThreshold = itemData.threshold ?? item.threshold;
-        
-        newStatus = newStock === 0 
+        : (item.currentStock < item.threshold ? 'low_stock' : 'in_stock');
+    } else if (typeof item.currentStock !== 'undefined') {
+      // Get the current item to check threshold
+      const currentItem = await this.getInventoryItem(id);
+      if (currentItem) {
+        updateData.status = item.currentStock === 0 
           ? 'out_of_stock' 
-          : newStock <= newThreshold 
-            ? 'low_stock' 
-            : 'in_stock';
+          : (item.currentStock < currentItem.threshold ? 'low_stock' : 'in_stock');
       }
-      
-      const [updatedItem] = await db
-        .update(inventoryItems)
-        .set({ ...itemData, status: newStatus as any, updatedAt: new Date() })
-        .where(eq(inventoryItems.id, id))
-        .returning();
-      
-      return updatedItem;
-    } catch (error) {
-      console.error("Error updating inventory item:", error);
-      throw error;
     }
+    
+    // Handle expirationDate conversion
+    if (typeof item.expirationDate === 'string') {
+      if (item.expirationDate.trim() === '') {
+        updateData.expirationDate = null;
+      } else {
+        updateData.expirationDate = new Date(item.expirationDate);
+      }
+    }
+    
+    // Update the item
+    const [updatedItem] = await db
+      .update(inventoryItems)
+      .set(updateData)
+      .where(eq(inventoryItems.id, id))
+      .returning();
+      
+    return updatedItem;
+  } catch (error) {
+    console.error("Error updating inventory item:", error);
+    throw error;
   }
-  
+}
   async updateInventoryStock(id: number, quantity: number): Promise<InventoryItem | undefined> {
     try {
       const [item] = await db.select().from(inventoryItems).where(eq(inventoryItems.id, id));
@@ -636,46 +743,68 @@ export class DatabaseStorage implements IStorage {
     lowStockCount: number;
     recentlyAdded: number;
     outOfStock: number;
+    expiringSoon: number;
   }> {
     try {
       // Get total items count
       const [{ count: totalItems }] = await db
-        .select({ count: db.fn.count() })
+        .select({ count: count() })
         .from(inventoryItems);
       
       // Get low stock count
       const [{ count: lowStockCount }] = await db
-        .select({ count: db.fn.count() })
+        .select({ count: count() })
         .from(inventoryItems)
-        .where(eq(inventoryItems.status, 'low_stock'));
+        .where(
+          and(
+            lt(inventoryItems.currentStock, inventoryItems.threshold),
+            gt(inventoryItems.currentStock, 0)
+          )
+        );
       
       // Get out of stock count
       const [{ count: outOfStock }] = await db
-        .select({ count: db.fn.count() })
+        .select({ count: count() })
         .from(inventoryItems)
-        .where(eq(inventoryItems.status, 'out_of_stock'));
+        .where(eq(inventoryItems.currentStock, 0));
       
       // Get recently added count (last 30 days)
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
       const [{ count: recentlyAdded }] = await db
-        .select({ count: db.fn.count() })
+        .select({ count: count() })
         .from(inventoryItems)
         .where(gte(inventoryItems.createdAt, thirtyDaysAgo));
+      
+      // Get expiring soon count (next 30 days)
+      const thirtyDaysFromNow = new Date();
+      thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+      const today = new Date();
+      
+      const [{ count: expiringSoon }] = await db
+        .select({ count: count() })
+        .from(inventoryItems)
+        .where(
+          and(
+            isNotNull(inventoryItems.expirationDate),
+            lte(inventoryItems.expirationDate, thirtyDaysFromNow),
+            gt(inventoryItems.expirationDate, today)
+          )
+        );
       
       return {
         totalItems: Number(totalItems),
         lowStockCount: Number(lowStockCount),
         recentlyAdded: Number(recentlyAdded),
-        outOfStock: Number(outOfStock)
+        outOfStock: Number(outOfStock),
+        expiringSoon: Number(expiringSoon)
       };
     } catch (error) {
       console.error("Error getting dashboard stats:", error);
       throw error;
     }
   }
-  
   // Recent activity
   async getRecentActivity(limit = 5): Promise<AuditLog[]> {
     try {
@@ -724,99 +853,419 @@ export class MemStorage implements IStorage {
       this.seedInitialData();
     }, 0);
   }
+
+ // In your MemStorage class in storage.ts
+async getCriticalExpirationItems(): Promise<InventoryItem[]> {
+  const today = new Date();
+  const twoWeeksFromNow = new Date();
+  twoWeeksFromNow.setDate(today.getDate() + 14); // 2 weeks
   
-  private async seedInitialData(): Promise<void> {
-    try {
-      // Import the hashPassword function
-      const { hashPassword } = await import('./utils/password');
-      
-      // Create admin user
-      this.createUser({
-        name: "Admin User",
-        username: "admin",
-        email: "admin@hospital.org",
-        password: await hashPassword("admin123"),
-        role: "admin",
-        department: "Administration",
-        active: true,
-        confirmPassword: "admin123"
-      });
-      
-      // Create staff user
-      this.createUser({
-        name: "Staff User",
-        username: "staff",
-        email: "staff@hospital.org",
-        password: await hashPassword("staff123"),
-        role: "staff",
-        department: "Emergency",
-        active: true,
-        confirmPassword: "staff123"
-      });
-    } catch (error) {
-      console.error("Error seeding initial data:", error);
-    }
+  return Array.from(this.inventory.values()).filter(item => {
+    if (!item.expirationDate) return false;
+    const expDate = new Date(item.expirationDate);
+    return expDate > today && expDate <= twoWeeksFromNow;
+  });
+}
+  
+ private async seedInitialData(): Promise<void> {
+  try {
+    // Import the hashPassword function
+    const { hashPassword } = await import('./utils/password');
     
-    // Create departments
-    const emergency = await this.createDepartment({ name: "Emergency", description: "Emergency department" });
-    const surgery = await this.createDepartment({ name: "Surgery", description: "Surgery department" });
-     const pediatrics = await this.createDepartment({ name: "Pediatrics", description: "Pediatrics department" });
-    const cardiology = await this.createDepartment({ name: "Cardiology", description: "Cardiology department" });    
-    const general = await this.createDepartment({ name: "General", description: "General department" });
-
-    
-    // Create categories
-    const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
-    const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
-    const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
-    const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
-    
-    // Create inventory items
-    this.createInventoryItem({
-      itemId: "PPE-001",
-      name: "N95 Masks",
-      description: "N95 respirator masks",
-      departmentId: emergency.id,
-      categoryId: ppe.id,
-      currentStock: 25,
-      unit: "units",
-      threshold: 50
+    // Create admin user
+    this.createUser({
+      name: "Admin User",
+      username: "admin",
+      email: "admin@hospital.org",
+      password: await hashPassword("admin123"),
+      role: "admin",
+      department: "Administration",
+      active: true,
+      confirmPassword: "admin123"
     });
     
-    this.createInventoryItem({
-      itemId: "PPE-002",
-      name: "Surgical Gloves (S)",
-      description: "Small surgical gloves",
-      departmentId: surgery.id,
-      categoryId: ppe.id,
-      currentStock: 10,
-      unit: "boxes",
-      threshold: 20
+    // Create staff user
+    this.createUser({
+      name: "Staff User",
+      username: "staff",
+      email: "staff@hospital.org",
+      password: await hashPassword("staff123"),
+      role: "staff",
+      department: "Emergency",
+      active: true,
+      confirmPassword: "staff123"
     });
-    
-    this.createInventoryItem({
-      itemId: "MED-023",
-      name: "IV Saline Solution",
-      description: "Intravenous saline solution",
-      departmentId: general.id,
-      categoryId: pharmaceuticals.id,
-      currentStock: 30,
-      unit: "bags",
-      threshold: 40
-    });
-    
-    this.createInventoryItem({
-      itemId: "EQP-108",
-      name: "Blood Pressure Monitor",
-      description: "Digital blood pressure monitoring device",
-      departmentId: cardiology.id,
-      categoryId: equipment.id,
-      currentStock: 15,
-      unit: "units",
-      threshold: 5
-    });
+  } catch (error) {
+    console.error("Error seeding initial data:", error);
   }
+  
+  // Create departments
+  const emergency = await this.createDepartment({ name: "Emergency", description: "Emergency department" });
+  const surgery = await this.createDepartment({ name: "Surgery", description: "Surgery department" });
+  const pediatrics = await this.createDepartment({ name: "Pediatrics", description: "Pediatrics department" });
+  const cardiology = await this.createDepartment({ name: "Cardiology", description: "Cardiology department" });    
+  const general = await this.createDepartment({ name: "General", description: "General department" });
 
+  // Create categories
+  const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
+  const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
+  const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
+  const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
+  
+  // Helper functions for dates that return strings
+  const getDateInFuture = (days: number): string => {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD
+  };
+  const getDateInPast = (days: number): string => {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    return date.toISOString().split('T')[0]; // Returns YYYY-MM-DD
+  };
+  
+  // --- 10 IN-STOCK ITEMS ---
+  
+  // In-stock item 1
+  this.createInventoryItem({
+    itemId: "PPE-001",
+    name: "N95 Masks",
+    description: "N95 respirator masks",
+    departmentId: emergency.id,
+    categoryId: ppe.id,
+    currentStock: 65,
+    unit: "units",
+    threshold: 50,
+    expirationDate: getDateInFuture(120) // 4 months from now
+  });
+  
+  // In-stock item 2
+  this.createInventoryItem({
+    itemId: "MED-103",
+    name: "Paracetamol 500mg",
+    description: "Pain and fever medication",
+    departmentId: general.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 85,
+    unit: "boxes",
+    threshold: 30,
+    expirationDate: getDateInFuture(180) // 6 months from now
+  });
+  
+  this.createInventoryItem({
+    itemId: "EQP-108",
+    name: "Blood Pressure Monitor",
+    description: "Digital blood pressure monitoring device",
+    departmentId: cardiology.id,
+    categoryId: equipment.id,
+    currentStock: 15,
+    unit: "units",
+    threshold: 5,
+    expirationDate: getDateInFuture(365) // Calibration date 1 year from now
+  });
+  
+  // In-stock item 4
+  this.createInventoryItem({
+    itemId: "SUP-201",
+    name: "Gauze Pads",
+    description: "Sterile gauze pads for wound dressing",
+    departmentId: surgery.id,
+    categoryId: supplies.id,
+    currentStock: 120,
+    unit: "packs",
+    threshold: 50,
+    expirationDate: getDateInFuture(250) // ~8 months from now
+  });
+  
+  // In-stock item 5
+  this.createInventoryItem({
+    itemId: "PPE-005",
+    name: "Face Shields",
+    description: "Protective face shields",
+    departmentId: emergency.id,
+    categoryId: ppe.id,
+    currentStock: 35,
+    unit: "units",
+    threshold: 20,
+    expirationDate: getDateInFuture(365) // 1 year from now
+  });
+  
+  // In-stock item 6
+  this.createInventoryItem({
+    itemId: "MED-104",
+    name: "Hydrocortisone Cream",
+    description: "Anti-inflammatory skin cream",
+    departmentId: pediatrics.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 40,
+    unit: "tubes",
+    threshold: 15,
+    expirationDate: getDateInFuture(150) // 5 months from now
+  });
+  
+  // In-stock item 7
+  this.createInventoryItem({
+    itemId: "EQP-110",
+    name: "Stethoscope",
+    description: "Standard stethoscope",
+    departmentId: general.id,
+    categoryId: equipment.id,
+    currentStock: 25,
+    unit: "units",
+    threshold: 10,
+    expirationDate: getDateInFuture(180)  // No expiration (equipment)
+  });
+
+  this.createInventoryItem({
+    itemId: "PPE-005",
+    name: "Face Shields",
+    description: "Protective face shields",
+    departmentId: emergency.id,
+    categoryId: ppe.id,
+    currentStock: 0,
+    unit: "units",
+    threshold: 20,
+    expirationDate: getDateInFuture(365) // 1 year from now
+  });
+
+  this.createInventoryItem({
+    itemId: "PPE-005",
+    name: "Face Shields",
+    description: "Protective face shields",
+    departmentId: emergency.id,
+    categoryId: ppe.id,
+    currentStock: 0,
+    unit: "units",
+    threshold: 20,
+    expirationDate: getDateInFuture(365) // 1 year from now
+  });
+
+  this.createInventoryItem({
+    itemId: "PPE-005",
+    name: "Face Shields",
+    description: "Protective face shields",
+    departmentId: emergency.id,
+    categoryId: ppe.id,
+    currentStock: 0,
+    unit: "units",
+    threshold: 20,
+    expirationDate: getDateInFuture(365) // 1 year from now
+  });
+  
+  // In-stock item 8
+  this.createInventoryItem({
+    itemId: "SUP-205",
+    name: "Syringes 10ml",
+    description: "Disposable syringes",
+    departmentId: emergency.id,
+    categoryId: supplies.id,
+    currentStock: 200,
+    unit: "units",
+    threshold: 100,
+    expirationDate: getDateInFuture(300) // 10 months from now
+  });
+  
+  // In-stock item 9
+  this.createInventoryItem({
+    itemId: "MED-105",
+    name: "Multivitamin Tablets",
+    description: "General multivitamins",
+    departmentId: general.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 55,
+    unit: "bottles",
+    threshold: 20,
+    expirationDate: getDateInFuture(200) // ~6.5 months from now
+  });
+  
+  // In-stock item 10
+  this.createInventoryItem({
+    itemId: "PPE-008",
+    name: "Isolation Gowns",
+    description: "Disposable isolation gowns",
+    departmentId: surgery.id,
+    categoryId: ppe.id,
+    currentStock: 70,
+    unit: "units",
+    threshold: 40,
+    expirationDate: getDateInFuture(180) // 6 months from now
+  });
+  
+  // --- 5 LOW-STOCK ITEMS ---
+  
+  // Low-stock item 1
+  this.createInventoryItem({
+    itemId: "PPE-002",
+    name: "Surgical Gloves (S)",
+    description: "Small surgical gloves",
+    departmentId: surgery.id,
+    categoryId: ppe.id,
+    currentStock: 10,
+    unit: "boxes",
+    threshold: 20,
+    expirationDate: getDateInFuture(90) // 3 months from now
+  });
+  
+  // Low-stock item 2
+  this.createInventoryItem({
+    itemId: "MED-106",
+    name: "Aspirin 81mg",
+    description: "Low-dose aspirin",
+    departmentId: cardiology.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 12,
+    unit: "bottles",
+    threshold: 25,
+    expirationDate: getDateInFuture(100) // ~3.3 months from now
+  });
+  
+  // Low-stock item 3
+  this.createInventoryItem({
+    itemId: "SUP-210",
+    name: "Surgical Sutures",
+    description: "Sterile surgical sutures",
+    departmentId: surgery.id,
+    categoryId: supplies.id,
+    currentStock: 8,
+    unit: "boxes",
+    threshold: 15,
+    expirationDate: getDateInFuture(180) // 6 months from now
+  });
+  
+  // Low-stock item 4
+  this.createInventoryItem({
+    itemId: "PPE-009",
+    name: "Surgical Caps",
+    description: "Disposable surgical caps",
+    departmentId: surgery.id,
+    categoryId: ppe.id,
+    currentStock: 15,
+    unit: "packs",
+    threshold: 30,
+    expirationDate: getDateInFuture(150) // 5 months from now
+  });
+  
+  // Low-stock item 5
+  this.createInventoryItem({
+    itemId: "MED-108",
+    name: "Antibiotic Ointment",
+    description: "Topical antibiotic ointment",
+    departmentId: pediatrics.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 7,
+    unit: "tubes",
+    threshold: 20,
+    expirationDate: getDateInFuture(75) // 2.5 months from now
+  });
+  
+  // --- 3 SOON-TO-EXPIRE ITEMS (WITHIN 2 WEEKS) ---
+  
+  // Soon-to-expire item 1
+  this.createInventoryItem({
+    itemId: "MED-101",
+    name: "Amoxicillin 500mg",
+    description: "Antibiotic medication",
+    departmentId: general.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 45,
+    unit: "boxes",
+    threshold: 20,
+    expirationDate: getDateInFuture(10) // 10 days from now
+  });
+  
+  // Soon-to-expire item 2
+  this.createInventoryItem({
+    itemId: "MED-102",
+    name: "Ibuprofen 200mg",
+    description: "Pain relief medication",
+    departmentId: emergency.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 30,
+    unit: "bottles",
+    threshold: 15,
+    expirationDate: getDateInFuture(5) // 5 days from now
+  });
+  
+  // Soon-to-expire item 3
+  this.createInventoryItem({
+    itemId: "SUP-200",
+    name: "Bandages (Sterile)",
+    description: "Sterile adhesive bandages",
+    departmentId: emergency.id,
+    categoryId: supplies.id,
+    currentStock: 5, // Also low stock!
+    unit: "boxes",
+    threshold: 15,
+    expirationDate: getDateInFuture(12) // 12 days from now
+  });
+  
+  // --- 5 ALREADY EXPIRED ITEMS ---
+  
+  // Expired item 1
+  this.createInventoryItem({
+    itemId: "MED-050",
+    name: "Acetaminophen 500mg",
+    description: "Pain relief medication",
+    departmentId: pediatrics.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 12,
+    unit: "boxes",
+    threshold: 10,
+    expirationDate: getDateInPast(10) // 10 days ago
+  });
+  
+  // Expired item 2
+  this.createInventoryItem({
+    itemId: "MED-051",
+    name: "Cough Syrup",
+    description: "Cough suppressant",
+    departmentId: pediatrics.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 8,
+    unit: "bottles",
+    threshold: 12,
+    expirationDate: getDateInPast(5) // 5 days ago
+  });
+  
+  // Expired item 3
+  this.createInventoryItem({
+    itemId: "MED-055",
+    name: "Diphenhydramine",
+    description: "Antihistamine medication",
+    departmentId: general.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 4,
+    unit: "boxes",
+    threshold: 10,
+    expirationDate: getDateInPast(15) // 15 days ago
+  });
+  
+  // Expired item 4
+  this.createInventoryItem({
+    itemId: "SUP-220",
+    name: "Sterile Wipes",
+    description: "Alcohol-based sterile wipes",
+    departmentId: surgery.id,
+    categoryId: supplies.id,
+    currentStock: 3,
+    unit: "packs",
+    threshold: 10,
+    expirationDate: getDateInPast(30) // 30 days ago
+  });
+  
+  // Expired item 5
+  this.createInventoryItem({
+    itemId: "MED-056",
+    name: "Topical Anesthetic",
+    description: "Local anesthetic gel",
+    departmentId: emergency.id,
+    categoryId: pharmaceuticals.id,
+    currentStock: 6,
+    unit: "tubes",
+    threshold: 8,
+    expirationDate: getDateInPast(3) // 3 days ago
+  });
+}
   // User operations
   async getUser(id: number): Promise<User | undefined> {
     return this.users.get(id);
@@ -1007,69 +1456,117 @@ export class MemStorage implements IStorage {
   }
   
   async getLowStockItems(): Promise<InventoryItem[]> {
-    return Array.from(this.inventory.values()).filter(
-      item => item.status === 'low_stock' || item.status === 'out_of_stock'
-    );
+    // Get all inventory items, filter for low stock but not out of stock
+    const lowStockItems = Array.from(this.inventory.values())
+      .filter(item => 
+        item.currentStock < item.threshold && 
+        item.currentStock > 0 // This excludes items with 0 quantity
+      )
+      .sort((a, b) => {
+        // Sort by updatedAt (newest first)
+        const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, 5); // Limit to 5 items
+    
+    return lowStockItems;
+  }
+
+  // Add this method to your MemStorage class
+async getOutOfStockItems(): Promise<InventoryItem[]> {
+  // Get all inventory items
+  const allItems = Array.from(this.inventory.values());
+  
+  // Filter for items with currentStock = 0
+  const outOfStockItems = allItems
+    .filter(item => item.currentStock === 0)
+    .sort((a, b) => {
+      // Sort by updatedAt (newest first)
+      const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return dateB - dateA;
+    })
+    .slice(0, 5); // Limit to 5 items
+  
+  return outOfStockItems;
+}
+  
+async createInventoryItem(itemData: InsertInventoryItem): Promise<InventoryItem> {
+  const id = this.inventoryIdCounter++;
+  
+  // Determine status based on quantity and threshold
+  const status = itemData.currentStock === 0 
+    ? 'out_of_stock' 
+    : itemData.currentStock! <= itemData.threshold! 
+      ? 'low_stock' 
+      : 'in_stock';
+  
+  // Handle expirationDate conversion
+  let expirationDate = null;
+  if (itemData.expirationDate && itemData.expirationDate.trim() !== '') {
+    expirationDate = new Date(itemData.expirationDate);
   }
   
-  async createInventoryItem(itemData: InsertInventoryItem): Promise<InventoryItem> {
-    const id = this.inventoryIdCounter++;
+  const item: InventoryItem = {
+    id,
+    itemId: itemData.itemId,
+    name: itemData.name,
+    description: itemData.description || null, // Handle possibly undefined
+    departmentId: itemData.departmentId,
+    categoryId: itemData.categoryId,
+    currentStock: itemData.currentStock!,       // Non-null assertion
+    unit: itemData.unit,
+    threshold: itemData.threshold!,             // Non-null assertion
+    status: status as any,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    expirationDate: expirationDate              // Add expirationDate
+  };
+  
+  this.inventory.set(id, item);
+  return item;
+}
+
+async updateInventoryItem(id: number, itemData: UpdateInventoryItem): Promise<InventoryItem | undefined> {
+  const item = this.inventory.get(id);
+  if (!item) return undefined;
+  
+  // Determine new status if stock or threshold changed
+  let newStatus = item.status;
+  
+  if ('currentStock' in itemData || 'threshold' in itemData) {
+    const newStock = itemData.currentStock ?? item.currentStock;
+    const newThreshold = itemData.threshold ?? item.threshold;
     
-    // Determine status based on quantity and threshold
-    const status = itemData.currentStock === 0 
+    newStatus = newStock === 0 
       ? 'out_of_stock' 
-      : itemData.currentStock! <= itemData.threshold! 
+      : newStock <= newThreshold 
         ? 'low_stock' 
         : 'in_stock';
-    
-    const item: InventoryItem = {
-      id,
-      itemId: itemData.itemId,
-      name: itemData.name,
-      description: itemData.description || null, // Handle possibly undefined
-      departmentId: itemData.departmentId,
-      categoryId: itemData.categoryId,
-      currentStock: itemData.currentStock!,       // Non-null assertion
-      unit: itemData.unit,
-      threshold: itemData.threshold!,             // Non-null assertion
-      status: status as any,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    
-    this.inventory.set(id, item);
-    return item;
   }
   
-  async updateInventoryItem(id: number, itemData: UpdateInventoryItem): Promise<InventoryItem | undefined> {
-    const item = this.inventory.get(id);
-    if (!item) return undefined;
-    
-    // Determine new status if stock or threshold changed
-    let newStatus = item.status;
-    
-    if ('currentStock' in itemData || 'threshold' in itemData) {
-      const newStock = itemData.currentStock ?? item.currentStock;
-      const newThreshold = itemData.threshold ?? item.threshold;
-      
-      newStatus = newStock === 0 
-        ? 'out_of_stock' 
-        : newStock <= newThreshold 
-          ? 'low_stock' 
-          : 'in_stock';
+  // Handle expirationDate conversion
+  let expirationDate = item.expirationDate;
+  if (typeof itemData.expirationDate === 'string') {
+    if (itemData.expirationDate.trim() === '') {
+      expirationDate = null;
+    } else {
+      expirationDate = new Date(itemData.expirationDate);
     }
-    
-    const updatedItem: InventoryItem = {
-      ...item,
-      ...itemData,
-      status: newStatus as any,
-      updatedAt: new Date()
-    };
-    
-    this.inventory.set(id, updatedItem);
-    return updatedItem;
   }
   
+  const updatedItem: InventoryItem = {
+    ...item,
+    ...itemData,
+    status: newStatus as any,
+    updatedAt: new Date(),
+    expirationDate: expirationDate  // Use the processed expirationDate
+  };
+  
+  this.inventory.set(id, updatedItem);
+  return updatedItem;
+}
   async updateInventoryStock(id: number, quantity: number): Promise<InventoryItem | undefined> {
     const item = this.inventory.get(id);
     if (!item) return undefined;
@@ -1095,6 +1592,47 @@ export class MemStorage implements IStorage {
     return updatedItem;
   }
   
+  async getSoonToExpireItems(): Promise<InventoryItem[]> {
+    const today = new Date();
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(today.getDate() + 30);
+    
+    // Get all inventory items, filter for those expiring soon
+    const soonToExpireItems = Array.from(this.inventory.values())
+      .filter(item => {
+        if (!item.expirationDate) return false;
+        
+        // Use type guard to check if expirationDate is a Date object
+        let expDate: Date;
+        if (item.expirationDate instanceof Date) {
+          expDate = item.expirationDate;
+        } else {
+          // It's a string or number at this point
+          expDate = new Date(item.expirationDate); // Safe to call now
+        }
+        
+        return expDate > today && expDate <= thirtyDaysFromNow;
+      })
+      .sort((a, b) => {
+        if (!a.expirationDate) return 1;
+        if (!b.expirationDate) return -1;
+        
+        // Same type checking pattern for sorting
+        const dateA = a.expirationDate instanceof Date 
+          ? a.expirationDate 
+          : new Date(a.expirationDate); // Now safe
+          
+        const dateB = b.expirationDate instanceof Date 
+          ? b.expirationDate 
+          : new Date(b.expirationDate); // Now safe
+          
+        return dateA.getTime() - dateB.getTime();
+      })
+      .slice(0, 5); // Limit to 5 items
+    
+    return soonToExpireItems;
+  }
+
   async deleteInventoryItem(id: number): Promise<boolean> {
     return this.inventory.delete(id);
   }
@@ -1171,42 +1709,66 @@ export class MemStorage implements IStorage {
       total: allLogs.length
     };
   }
-  
   // Dashboard statistics
-  async getDashboardStats(): Promise<{
-    totalItems: number;
-    lowStockCount: number;
-    recentlyAdded: number;
-    outOfStock: number;
-  }> {
-    const allItems = Array.from(this.inventory.values());
-    
-    const totalItems = allItems.length;
-    
-    const lowStockCount = allItems.filter(
-      item => item.status === 'low_stock'
-    ).length;
-    
-    const outOfStock = allItems.filter(
-      item => item.status === 'out_of_stock'
-    ).length;
-    
-    // Items added in last 30 days
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
-    const recentlyAdded = allItems.filter(
-      item => item.createdAt && item.createdAt >= thirtyDaysAgo
-    ).length;
-    
-    return {
-      totalItems,
-      lowStockCount,
-      recentlyAdded,
-      outOfStock
-    };
-  }
+async getDashboardStats(): Promise<{
+  totalItems: number;
+  lowStockCount: number;
+  recentlyAdded: number;
+  outOfStock: number;
+  expiringSoon: number;
+}> {
+  const allItems = Array.from(this.inventory.values());
+  const today = new Date();
   
+  // Calculate dates for filtering
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+  
+  const thirtyDaysFromNow = new Date();
+  thirtyDaysFromNow.setDate(today.getDate() + 30);
+  
+  // Count items
+  const totalItems = allItems.length;
+  
+  const lowStockCount = allItems.filter(
+    item => (item.currentStock ?? 0) < (item.threshold ?? 10) && (item.currentStock ?? 0) > 0
+  ).length;
+  
+  const outOfStock = allItems.filter(
+    item => (item.currentStock ?? 0) === 0
+  ).length;
+  
+  // Fix: Count the number of recently added items, not return the array
+  const recentlyAdded = allItems.filter(item => {
+    const createdAt = item.createdAt instanceof Date 
+      ? item.createdAt 
+      : new Date(item.createdAt ?? new Date());
+    return createdAt >= thirtyDaysAgo;
+  }).length; // Add .length to get the count
+  
+  const expiringSoon = allItems.filter(item => {
+    if (!item.expirationDate) return false;
+    
+    // Use type guard to safely handle Date conversion
+    let expDate: Date;
+    if (item.expirationDate instanceof Date) {
+      expDate = item.expirationDate;
+    } else {
+      // It's a string or number at this point
+      expDate = new Date(item.expirationDate as string | number);
+    }
+    
+    return expDate > today && expDate <= thirtyDaysFromNow;
+  }).length;
+  
+  return {
+    totalItems,
+    lowStockCount,
+    recentlyAdded,
+    outOfStock,
+    expiringSoon
+  };
+}
   // Recent activity
   async getRecentActivity(limit = 5): Promise<AuditLog[]> {
     return Array.from(this.auditLogs.values())
@@ -1220,7 +1782,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-// Use MemStorage for now, can be replaced with DatabaseStorage when ready
-// Use MemStorage for consistent setup while we troubleshoot
-// Explicitly using MemStorage while debugging the server startup issues
 export const storage = new MemStorage();

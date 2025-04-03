@@ -9,13 +9,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-interface DataTableColumn<T> {
+// Add the export keyword here
+export interface DataTableColumn<T> {
   header: string;
   accessorKey: keyof T | ((row: T) => any);
   cell?: (row: T) => React.ReactNode;
 }
 
-interface DataTableProps<T> {
+export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
   data: T[];
   page: number;

@@ -1,15 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
+import { DataTable, DataTableColumn } from "@/components/ui/data-table";
 import { InventoryForm } from "@/components/inventory/inventory-form";
 import { InventoryFilters, type InventoryFilters as Filters } from "@/components/inventory/inventory-filters";
 import { InventoryItem, Department, Category } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useMutation } from "@tanstack/react-query";
-import { Plus, Edit, PlusCircle, Trash, AlertCircle } from "lucide-react";
+import { Plus, Edit, PlusCircle, Trash, AlertCircle, Clock, RefreshCw } from "lucide-react";
+import { format } from "date-fns";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,6 +35,7 @@ interface InventoryResponse {
   page: number;
   limit: number;
   total: number;
+  totalItems: number; // Make sure this is included
   totalPages: number;
 }
 
@@ -46,6 +48,8 @@ export default function InventoryPage() {
   const [deleteItemId, setDeleteItemId] = useState<number | undefined>(undefined);
   const [stockItemId, setStockItemId] = useState<number | undefined>(undefined);
   const [stockQuantity, setStockQuantity] = useState<number>(0);
+  const [restockItemId, setRestockItemId] = useState<number | undefined>(undefined);
+  const [restockQuantity, setRestockQuantity] = useState<number>(10); // Default to 10
 
   // Fetch departments for mapping names
   const { data: departments } = useQuery<Department[]>({
@@ -67,20 +71,23 @@ export default function InventoryPage() {
 
   // Fetch inventory items with pagination and filters
   const { data: inventoryData, isLoading } = useQuery<InventoryResponse>({
-    queryKey: ["/api/inventory", page, filters],
+    queryKey: ["/api/inventory", page, JSON.stringify(filters)], // Use stringified filters for proper cache key
     queryFn: async () => {
+      console.log(`Fetching page ${page} with filters:`, filters);
       let url = `/api/inventory?page=${page}`;
       
       if (filters.departmentId) url += `&departmentId=${filters.departmentId}`;
       if (filters.categoryId) url += `&categoryId=${filters.categoryId}`;
       if (filters.status) url += `&status=${filters.status}`;
       if (filters.search) url += `&search=${encodeURIComponent(filters.search)}`;
+      if (filters.expiring) url += `&expiring=${filters.expiring}`;
       
       const response = await apiRequest("GET", url);
       return response.json();
     },
+    refetchOnWindowFocus: false,
   });
-
+  
   // Mutation for deleting an item
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -89,6 +96,7 @@ export default function InventoryPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/soon-to-expire"] });
       toast({
         title: "Success",
         description: "Inventory item has been deleted",
@@ -113,6 +121,7 @@ export default function InventoryPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/soon-to-expire"] });
       toast({
         title: "Success",
         description: "Stock has been updated",
@@ -129,10 +138,43 @@ export default function InventoryPage() {
     },
   });
 
+  // Mutation for restocking out-of-stock items
+  const restockMutation = useMutation({
+    mutationFn: async ({ id, quantity }: { id: number, quantity: number }) => {
+      const response = await apiRequest("POST", `/api/inventory/${id}/restock`, { quantity });
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/soon-to-expire"] });
+      toast({
+        title: "Success",
+        description: "Item has been restocked successfully",
+      });
+      setRestockItemId(undefined);
+      setRestockQuantity(10); // Reset to default
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to restock item",
+        variant: "destructive",
+      });
+    },
+  });
+
   // Handle filter changes
   const handleFilterChange = (newFilters: Filters) => {
     setFilters(newFilters);
     setPage(1); // Reset to first page when filters change
+  };
+
+  // Handle page change
+  const handlePageChange = (newPage: number) => {
+    console.log("Changing to page:", newPage);
+    setPage(newPage);
+    window.scrollTo(0, 0); // Scroll to top when changing pages
   };
 
   // Confirm delete item
@@ -149,6 +191,13 @@ export default function InventoryPage() {
     }
   };
 
+  // Confirm restock
+  const confirmRestock = () => {
+    if (restockItemId) {
+      restockMutation.mutate({ id: restockItemId, quantity: restockQuantity });
+    }
+  };
+
   // Find department and category names by ID
   const getDepartmentName = (id: number) => {
     const dept = departments?.find(d => d.id === id);
@@ -159,41 +208,65 @@ export default function InventoryPage() {
     const cat = categories?.find(c => c.id === id);
     return cat ? cat.name : `Category ${id}`;
   };
+  
+  // Check if item is expiring soon (within 30 days)
+  const isExpiringSoon = (date: string | Date | null): boolean => {
+    if (!date) return false;
+    
+    const expDate = new Date(date);
+    const today = new Date();
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(today.getDate() + 30);
+    
+    return expDate > today && expDate <= thirtyDaysFromNow;
+  };
 
-  // Table columns
-  const columns = [
+  const columns: DataTableColumn<InventoryItem>[] = [
     {
       header: "Item Name",
-      accessorKey: "name" as keyof InventoryItem,
+      accessorKey: "name",
+      cell: (row: InventoryItem) => row.name
     },
     {
       header: "ID",
-      accessorKey: "itemId" as keyof InventoryItem,
+      accessorKey: "itemId",
+      cell: (row: InventoryItem) => row.itemId
     },
     {
       header: "Department",
-      accessorKey: "departmentId" as keyof InventoryItem,
-      cell: (row: InventoryItem) => getDepartmentName(row.departmentId),
+      accessorKey: "departmentId" as const,
+      cell: (row: InventoryItem) => getDepartmentName(row.departmentId)
     },
     {
       header: "Category",
-      accessorKey: "categoryId" as keyof InventoryItem,
-      cell: (row: InventoryItem) => getCategoryName(row.categoryId),
+      accessorKey: "categoryId" as const,
+      cell: (row: InventoryItem) => getCategoryName(row.categoryId)
     },
     {
       header: "Current Stock",
-      accessorKey: "currentStock" as keyof InventoryItem,
+      accessorKey: "currentStock" as const,
       cell: (row: InventoryItem) => `${row.currentStock} ${row.unit}`
     },
     {
       header: "Status",
-      accessorKey: "status" as keyof InventoryItem,
+      accessorKey: "status" as const,
       cell: (row: InventoryItem) => {
         if (row.status === "out_of_stock") {
           return (
-            <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
-              Out of Stock
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-red-100 text-red-800">
+                Out of Stock
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-xs bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                onClick={() => setRestockItemId(row.id)}
+              >
+                <RefreshCw className="mr-1 h-3 w-3" />
+                Restock
+              </Button>
+            </div>
           );
         } else if (row.status === "low_stock") {
           return (
@@ -210,13 +283,33 @@ export default function InventoryPage() {
       }
     },
     {
+      header: "Expiration Date",
+      accessorKey: "expirationDate" as const,
+      cell: (row: InventoryItem) => {
+        if (!row.expirationDate) {
+          return <span className="text-muted-foreground text-xs">No expiration</span>;
+        }
+        
+        if (isExpiringSoon(row.expirationDate)) {
+          return (
+            <span className="text-amber-600 flex items-center">
+              <Clock className="h-3 w-3 mr-1" />
+              {format(new Date(row.expirationDate), 'MMM dd, yyyy')}
+            </span>
+          );
+        }
+        
+        return format(new Date(row.expirationDate), 'MMM dd, yyyy');
+      }
+    },
+    {
       header: "Last Updated",
-      accessorKey: "updatedAt" as keyof InventoryItem,
-      cell: (row: InventoryItem) => row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : "N/A"
+      accessorKey: "updatedAt" as const,
+      cell: (row: InventoryItem) => row.updatedAt ? format(new Date(row.updatedAt), 'MMM dd, yyyy') : "N/A"
     },
     {
       header: "Actions",
-      accessorKey: "id" as keyof InventoryItem,
+      accessorKey: "id",
       cell: (row: InventoryItem) => (
         <div className="flex justify-end gap-2">
           <Button
@@ -250,40 +343,39 @@ export default function InventoryPage() {
             <Trash className="h-4 w-4 text-red-500" />
           </Button>
         </div>
-      )
-    }
-  ];
+        )
+      }
+    ];
 
   return (
     <AppLayout title="Inventory Management">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-        <div className="w-full md:w-auto flex-1">
+      {/* Header section with add button */}
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex-1">
           <InventoryFilters onFilter={handleFilterChange} />
         </div>
-        <div className="w-full md:w-auto">
-          <Button
-            onClick={() => {
-              setEditItemId(undefined);
-              setIsAddFormOpen(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Add Item
-          </Button>
-        </div>
+        <Button 
+          onClick={() => setIsAddFormOpen(true)}
+          className="bg-primary hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Item
+        </Button>
       </div>
-
-      {/* Inventory Table */}
-      <DataTable
-        columns={columns}
-        data={inventoryData?.items || []}
-        page={page}
-        totalPages={inventoryData?.totalPages || 1}
-        onPageChange={setPage}
-        isLoading={isLoading}
-      />
-
-      {/* Add/Edit Item Form */}
+      
+      {/* Main content - inventory table */}
+      <div className="bg-white rounded-lg shadow">
+        <DataTable
+          columns={columns}
+          data={inventoryData?.items || []}
+          page={page}
+          totalPages={inventoryData?.totalPages || 1}
+          onPageChange={handlePageChange}
+          isLoading={isLoading}
+        />
+      </div>
+      
+      {/* Add/Edit Form Dialog */}
       <InventoryForm
         open={isAddFormOpen}
         onClose={() => {
@@ -292,63 +384,72 @@ export default function InventoryPage() {
         }}
         editItemId={editItemId}
       />
-
-      {/* Delete Confirmation */}
+      
+      {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteItemId} onOpenChange={() => setDeleteItemId(undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete this inventory item. This action cannot be undone.
+              This action cannot be undone. This will permanently delete the inventory item.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDelete}
-              className="bg-red-600 hover:bg-red-700"
-            >
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Stock Update Dialog */}
+      
+      {/* Update Stock Dialog */}
       <Dialog open={!!stockItemId} onOpenChange={() => setStockItemId(undefined)}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Adjust Stock Quantity</DialogTitle>
+            <DialogTitle>Update Stock Quantity</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <div className="flex items-center text-sm">
-                <AlertCircle className="mr-2 h-4 w-4 text-yellow-500" />
-                <p>Enter a positive number to add stock, or a negative number to remove stock.</p>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Input
-                  type="number"
-                  value={stockQuantity}
-                  onChange={(e) => setStockQuantity(Number(e.target.value))}
-                  placeholder="Enter quantity to adjust"
-                />
-              </div>
-            </div>
+          <div className="py-4">
+            <Input
+              type="number"
+              min="0"
+              value={stockQuantity}
+              onChange={(e) => setStockQuantity(parseInt(e.target.value) || 0)}
+              placeholder="Enter quantity to add"
+            />
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setStockItemId(undefined)}
-              disabled={updateStockMutation.isPending}
-            >
+            <Button variant="outline" onClick={() => setStockItemId(undefined)}>
               Cancel
             </Button>
-            <Button
-              onClick={confirmStockUpdate}
-              disabled={updateStockMutation.isPending}
-            >
-              {updateStockMutation.isPending ? "Updating..." : "Update Stock"}
+            <Button onClick={confirmStockUpdate}>
+              Update Stock
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Restock Dialog for out-of-stock items */}
+      <Dialog open={!!restockItemId} onOpenChange={() => setRestockItemId(undefined)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Restock Item</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              type="number"
+              min="1"
+              value={restockQuantity}
+              onChange={(e) => setRestockQuantity(parseInt(e.target.value) || 10)}
+              placeholder="Enter quantity to restock"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRestockItemId(undefined)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmRestock}>
+              Restock Item
             </Button>
           </DialogFooter>
         </DialogContent>

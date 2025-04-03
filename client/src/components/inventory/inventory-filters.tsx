@@ -1,22 +1,30 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { X, Filter } from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Search, Filter } from "lucide-react";
-import { Department, Category } from "@shared/schema";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export interface InventoryFilters {
   search?: string;
   departmentId?: number;
   categoryId?: number;
   status?: string;
+  expiring?: string;
 }
 
 interface InventoryFiltersProps {
@@ -24,143 +32,180 @@ interface InventoryFiltersProps {
 }
 
 export function InventoryFilters({ onFilter }: InventoryFiltersProps) {
-  const [filters, setFilters] = useState<InventoryFilters>({});
+  const [search, setSearch] = useState("");
+  const [departmentId, setDepartmentId] = useState<number | undefined>(undefined);
+  const [categoryId, setCategoryId] = useState<number | undefined>(undefined);
+  const [status, setStatus] = useState<string | undefined>(undefined);
+  const [expiring, setExpiring] = useState<string | undefined>(undefined);
   
-  // Fetch departments for filter
-  const { data: departments } = useQuery<Department[]>({
-    queryKey: ["/api/departments"],
-  });
-
-  // Fetch categories for filter
-  const { data: categories } = useQuery<Category[]>({
-    queryKey: ["/api/categories"],
-  });
-
-  const applyFilters = () => {
-    onFilter(filters);
-  };
-
+  // Reset all filters
   const resetFilters = () => {
-    setFilters({});
+    setSearch("");
+    setDepartmentId(undefined);
+    setCategoryId(undefined);
+    setStatus(undefined);
+    setExpiring(undefined);
+    
+    // Call onFilter with empty object to reset all filters
     onFilter({});
   };
-
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.value === "") {
-      const { search, ...rest } = filters;
-      setFilters(rest);
-    } else {
-      setFilters({ ...filters, search: e.target.value });
-    }
-  };
-
-  // Auto-apply filters for search with debounce
+  
+  // Apply filters when values change
   useEffect(() => {
-    const handler = setTimeout(() => {
-      onFilter(filters);
-    }, 300);
+    const filters: InventoryFilters = {};
+    
+    if (search) filters.search = search;
+    if (departmentId) filters.departmentId = departmentId;
+    if (categoryId) filters.categoryId = categoryId;
+    if (status) filters.status = status;
+    if (expiring) filters.expiring = expiring;
+    
+    onFilter(filters);
+  }, [search, departmentId, categoryId, status, expiring, onFilter]);
+  
+  // Fetch departments
+  const { data: departments = [] } = useQuery({
+    queryKey: ["/api/departments"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/departments");
+      return response.json();
+    }
+  });
+  
+  // Fetch categories
+  const { data: categories = [] } = useQuery({
+    queryKey: ["/api/categories"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/categories");
+      return response.json();
+    }
+  });
 
-    return () => clearTimeout(handler);
-  }, [filters.search, onFilter]);
+  // Count active filters
+  const activeFilterCount = [
+    departmentId, 
+    categoryId, 
+    status, 
+    expiring
+  ].filter(Boolean).length;
 
   return (
-    <div className="bg-white p-4 rounded-lg shadow mb-6">
-      <div className="flex flex-wrap gap-4">
-        <div className="w-full sm:w-auto flex-1">
-          <div className="relative">
-            <Input 
-              placeholder="Search inventory..." 
-              className="pl-10" 
-              value={filters.search || ""}
-              onChange={handleSearchChange}
-            />
-            <Search className="absolute left-3 top-2.5 h-5 w-5 text-neutral-400" />
-          </div>
-        </div>
-        <div className="w-full sm:w-auto">
-          <Select 
-            onValueChange={(value) => 
-              setFilters({ 
-                ...filters, 
-                departmentId: value !== "all_departments" ? parseInt(value) : undefined 
-              })
-            }
-            value={filters.departmentId?.toString() || "all_departments"}
-          >
-            <SelectTrigger className="w-full min-w-[180px]">
-              <SelectValue placeholder="All Departments" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all_departments">All Departments</SelectItem>
-              {departments?.map((department) => (
-                <SelectItem key={department.id} value={department.id.toString()}>
-                  {department.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="w-full sm:w-auto">
-          <Select 
-            onValueChange={(value) => 
-              setFilters({ 
-                ...filters, 
-                categoryId: value !== "all_categories" ? parseInt(value) : undefined 
-              })
-            }
-            value={filters.categoryId?.toString() || "all_categories"}
-          >
-            <SelectTrigger className="w-full min-w-[180px]">
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all_categories">All Categories</SelectItem>
-              {categories?.map((category) => (
-                <SelectItem key={category.id} value={category.id.toString()}>
-                  {category.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="w-full sm:w-auto">
-          <Select 
-            onValueChange={(value) => 
-              setFilters({ 
-                ...filters, 
-                status: value !== "all_status" ? value : undefined 
-              })
-            }
-            value={filters.status || "all_status"}
-          >
-            <SelectTrigger className="w-full min-w-[180px]">
-              <SelectValue placeholder="All Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all_status">All Status</SelectItem>
-              <SelectItem value="in_stock">In Stock</SelectItem>
-              <SelectItem value="low_stock">Low Stock</SelectItem>
-              <SelectItem value="out_of_stock">Out of Stock</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="w-full sm:w-auto flex gap-2">
-          <Button
-            variant="secondary"
-            className="flex-1"
-            onClick={applyFilters}
-          >
-            <Filter className="mr-2 h-4 w-4" />
-            Apply Filters
-          </Button>
-          <Button
-            variant="outline"
-            onClick={resetFilters}
-          >
-            Reset
-          </Button>
-        </div>
+    <div className="flex flex-col sm:flex-row gap-2 items-end">
+      <div className="w-full sm:max-w-xs">
+        <Input
+          placeholder="Search items..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-9"
+        />
       </div>
+      
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="h-9">
+            <Filter className="mr-2 h-4 w-4" />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="ml-1 rounded-full bg-primary w-4 h-4 text-[10px] flex items-center justify-center text-primary-foreground">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-[200px]">
+          <DropdownMenuLabel>Filter by</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          
+          <div className="p-2">
+            <label className="text-xs font-medium mb-1 block">Department</label>
+            <Select
+              value={departmentId?.toString() || "all"}
+              onValueChange={(value) => setDepartmentId(value !== "all" ? Number(value) : undefined)}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Departments" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Departments</SelectItem>
+                {departments.map((dept: any) => (
+                  <SelectItem key={dept.id} value={dept.id.toString()}>
+                    {dept.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div className="p-2">
+            <label className="text-xs font-medium mb-1 block">Category</label>
+            <Select
+              value={categoryId?.toString() || "all"}
+              onValueChange={(value) => setCategoryId(value !== "all" ? Number(value) : undefined)}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {categories.map((cat: any) => (
+                  <SelectItem key={cat.id} value={cat.id.toString()}>
+                    {cat.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div className="p-2">
+            <label className="text-xs font-medium mb-1 block">Status</label>
+            <Select
+              value={status || "all"}
+              onValueChange={(value) => setStatus(value !== "all" ? value : undefined)}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="in_stock">In Stock</SelectItem>
+                <SelectItem value="low_stock">Low Stock</SelectItem>
+                <SelectItem value="out_of_stock">Out of Stock</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <div className="p-2">
+            <label className="text-xs font-medium mb-1 block">Expiration</label>
+            <Select
+              value={expiring || "all"}
+              onValueChange={(value) => setExpiring(value !== "all" ? value : undefined)}
+            >
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Any Expiration" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any Expiration</SelectItem>
+                <SelectItem value="soon">Expiring Soon</SelectItem>
+                <SelectItem value="expired">Expired</SelectItem>
+                <SelectItem value="no_expiration">No Expiration</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          <DropdownMenuSeparator />
+          <div className="p-2">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-8 w-full text-xs justify-start"
+              onClick={resetFilters}
+            >
+              <X className="mr-2 h-3 w-3" />
+              Reset Filters
+            </Button>
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

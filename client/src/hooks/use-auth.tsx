@@ -49,8 +49,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(true);
         const response = await api.get("/user");
         
-        if (response.data.success) {
-          setUser(response.data.user);
+        if (response.data) {
+          setUser(response.data);
+          // Clear the expiration alert flag to ensure it shows on fresh login
+          sessionStorage.removeItem('expirationAlertShown');
         }
       } catch (err) {
         console.error("Auth check failed:", err);
@@ -69,8 +71,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return response.data;
     },
     onSuccess: (data) => {
-      setUser(data.user);
+      setUser(data);
       setError(null);
+      // Clear the expiration alert flag to ensure it shows on login
+      sessionStorage.removeItem('expirationAlertShown');
       queryClient.invalidateQueries();
     },
     onError: (err: any) => {
@@ -83,6 +87,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await api.post("/logout");
       setUser(null);
+      // Clear the expiration alert flag when logging out
+      sessionStorage.removeItem('expirationAlertShown');
       queryClient.clear();
     } catch (err) {
       console.error("Logout failed:", err);

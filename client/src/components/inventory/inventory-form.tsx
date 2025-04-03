@@ -6,6 +6,9 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { insertInventoryItemSchema, type Category, type Department, type InventoryItem } from "@shared/schema";
+import { format } from "date-fns";
+import { CalendarIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 import {
   Dialog,
@@ -20,7 +23,8 @@ import {
   FormField,
   FormItem,
   FormLabel,
-  FormMessage
+  FormMessage,
+  FormDescription
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,6 +36,8 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 
 export type InventoryItemFormType = z.infer<typeof inventoryItemSchema>;
 
@@ -39,7 +45,8 @@ const inventoryItemSchema = insertInventoryItemSchema.extend({
   departmentId: z.coerce.number(),
   categoryId: z.coerce.number(),
   currentStock: z.coerce.number().nonnegative(),
-  threshold: z.coerce.number().positive()
+  threshold: z.coerce.number().positive(),
+  expirationDate: z.string().optional() // Add expirationDate to schema
 });
 
 interface InventoryFormProps {
@@ -51,6 +58,7 @@ interface InventoryFormProps {
 export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [expirationDate, setExpirationDate] = useState<Date | undefined>(undefined);
 
   // Fetch departments
   const { data: departments = [] } = useQuery<Department[]>({
@@ -68,6 +76,10 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
   const { data: itemDetails } = useQuery<InventoryItem>({
     queryKey: ["/api/inventory", editItemId],
     enabled: !!editItemId && open,
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/inventory/${editItemId}`);
+      return response.json();
+    }
   });
 
   const form = useForm<InventoryItemFormType>({
@@ -80,7 +92,8 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
       categoryId: 0,
       currentStock: 0,
       unit: "units",
-      threshold: 10
+      threshold: 10,
+      expirationDate: "" // Default empty string for expiration date
     }
   });
 
@@ -90,6 +103,14 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
       if (editItemId && itemDetails) {
         // Type assertion to make TypeScript happy
         const item = itemDetails as unknown as InventoryItem;
+        
+        // Set expiration date if it exists
+        if (item.expirationDate) {
+          setExpirationDate(new Date(item.expirationDate));
+        } else {
+          setExpirationDate(undefined);
+        }
+        
         form.reset({
           itemId: item.itemId,
           name: item.name,
@@ -98,9 +119,11 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
           categoryId: item.categoryId,
           currentStock: item.currentStock,
           unit: item.unit,
-          threshold: item.threshold
+          threshold: item.threshold,
+          expirationDate: item.expirationDate ? new Date(item.expirationDate).toISOString() : ""
         });
       } else if (!editItemId) {
+        setExpirationDate(undefined);
         form.reset({
           itemId: "",
           name: "",
@@ -109,7 +132,8 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
           categoryId: 0,
           currentStock: 0,
           unit: "units",
-          threshold: 10
+          threshold: 10,
+          expirationDate: ""
         });
       }
     }
@@ -123,6 +147,7 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/soon-to-expire"] });
       toast({
         title: "Success",
         description: "Inventory item has been created",
@@ -147,6 +172,7 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory/soon-to-expire"] });
       toast({
         title: "Success",
         description: "Inventory item has been updated",
@@ -217,10 +243,10 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
                   <FormItem>
                     <FormLabel>Department</FormLabel>
                     <Select 
-                          onValueChange={field.onChange} 
-                         defaultValue={field.value?.toString() || ""}
-                          value={field.value?.toString() || ""}
-                          >
+                      onValueChange={field.onChange} 
+                      defaultValue={field.value?.toString() || ""}
+                      value={field.value?.toString() || ""}
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select Department" />
@@ -245,10 +271,10 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
                   <FormItem>
                     <FormLabel>Category</FormLabel>
                     <Select 
-                          onValueChange={field.onChange} 
-                         defaultValue={field.value?.toString() || ""}
-                          value={field.value?.toString() || ""}
-                          >
+                      onValueChange={field.onChange} 
+                      defaultValue={field.value?.toString() || ""}
+                      value={field.value?.toString() || ""}
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select Category" />
@@ -347,6 +373,53 @@ export function InventoryForm({ open, onClose, editItemId }: InventoryFormProps)
                 );
               }}
             />
+            
+            {/* Add expiration date field */}
+            <FormField
+              control={form.control}
+              name="expirationDate"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel>Expiration Date</FormLabel>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-full pl-3 text-left font-normal",
+                            !field.value && "text-muted-foreground"
+                          )}
+                        >
+                          {field.value ? (
+                            format(new Date(field.value), "PPP")
+                          ) : (
+                            <span>Pick a date</span>
+                          )}
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={expirationDate}
+                        onSelect={(date) => {
+                          setExpirationDate(date);
+                          field.onChange(date ? date.toISOString() : "");
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormDescription>
+                    Leave empty if the item does not expire
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            
             <DialogFooter>
               <Button
                 type="button"

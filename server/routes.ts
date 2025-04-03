@@ -13,6 +13,7 @@ import {
 } from "@shared/schema";
 import { ZodError, z } from "zod";
 import { fromZodError } from "zod-validation-error";
+import { InventoryItem } from '@shared/schema';
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Setup authentication
@@ -61,6 +62,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/dashboard/low-stock", isAuthenticated, async (req, res, next) => {
     try {
       const items = await storage.getLowStockItems();
+      res.json(items);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/dashboard/out-of-stock", isAuthenticated, async (req, res, next) => {
+    try {
+      const items = await storage.getOutOfStockItems();
       res.json(items);
     } catch (error) {
       next(error);
@@ -226,6 +236,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
       handleZodError(error, req, res, next);
     }
   });
+
+   // Soon to expire items endpoint
+   app.get("/api/inventory/soon-to-expire", isAuthenticated, async (req, res, next) => {
+    try {
+      const items = await storage.getSoonToExpireItems();
+      res.json(items);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/alerts/critical-expirations", isAuthenticated, async (req, res, next) => {
+    try {
+      const criticalItems = await storage.getCriticalExpirationItems();
+      res.json(criticalItems);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/inventory/:id/restock", isAuthenticated, async (req, res, next) => {
+    try {
+      const itemId = parseInt(req.params.id);
+      const { quantity } = req.body;
+      
+      // Input validation
+      if (!quantity || typeof quantity !== 'number' || quantity <= 0) {
+        return res.status(400).json({ message: "Please provide a valid quantity" });
+      }
+      
+      // Get the item
+      const item = await storage.getInventoryItem(itemId);
+      if (!item) {
+        return res.status(404).json({ message: "Item not found" });
+      }
+      
+      // Check if item is actually out of stock
+      if (item.currentStock > 0) {
+        return res.status(400).json({ message: "This item is not out of stock" });
+      }
+      
+      // Update the item with new stock
+      const updatedItem = await storage.updateInventoryItem(itemId, {
+        currentStock: quantity
+      });
+      
+      res.status(200).json(updatedItem);
+    } catch (error) {
+      next(error);
+    }
+  });
   
   app.delete("/api/categories/:id", isAdmin, async (req, res, next) => {
     try {
@@ -252,34 +313,105 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next(error);
     }
   });
-  
-  // Inventory routes
   app.get("/api/inventory", isAuthenticated, async (req, res, next) => {
     try {
-      const page = req.query.page ? parseInt(req.query.page as string) : 1;
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10; // Items per page
       
-      const filters: any = {};
+      // Get all inventory items
+      let result = await storage.getInventoryItems();
+      let filteredItems = [...result.items]; // Create a new working array
       
-      if (req.query.status) filters.status = req.query.status;
-      if (req.query.departmentId) filters.departmentId = parseInt(req.query.departmentId as string);
-      if (req.query.categoryId) filters.categoryId = parseInt(req.query.categoryId as string);
-      if (req.query.search) filters.search = req.query.search;
+      if (req.query.departmentId) {
+        const departmentId = parseInt(req.query.departmentId as string);
+        filteredItems = filteredItems.filter((item: InventoryItem) => item.departmentId === departmentId);
+      }
       
-      const { items, total } = await storage.getInventoryItems(page, limit, filters);
+      if (req.query.categoryId) {
+        const categoryId = parseInt(req.query.categoryId as string);
+        filteredItems = filteredItems.filter((item: InventoryItem) => item.categoryId === categoryId);
+      }
+      
+      if (req.query.status) {
+        const status = req.query.status as string;
+        filteredItems = filteredItems.filter((item: InventoryItem) => item.status === status);
+      }
+      
+      if (req.query.search) {
+        const search = (req.query.search as string).toLowerCase();
+        filteredItems = filteredItems.filter((item: InventoryItem) => 
+          item.name.toLowerCase().includes(search) || 
+          item.itemId.toLowerCase().includes(search)
+        );
+      }
+      
+      // Enhanced expiration filtering without logging
+      if (req.query.expiring) {
+        const expiring = req.query.expiring as string;
+        const today = new Date();
+        
+        if (expiring === 'soon') {
+          const thirtyDaysFromNow = new Date();
+          thirtyDaysFromNow.setDate(today.getDate() + 30);
+          
+          filteredItems = filteredItems.filter((item: InventoryItem) => {
+            if (!item.expirationDate) return false;
+            
+            // Parse the expiration date and ensure it's a valid Date
+            let expDate: Date;
+            try {
+              expDate = new Date(item.expirationDate);
+              // Check if the date is valid
+              if (isNaN(expDate.getTime())) {
+                return false;
+              }
+            } catch (error) {
+              return false;
+            }
+            
+            // Check if the item is expiring soon
+            return expDate > today && expDate <= thirtyDaysFromNow;
+          });
+          
+        } else if (expiring === 'expired') {
+          filteredItems = filteredItems.filter((item: InventoryItem) => {
+            if (!item.expirationDate) return false;
+            
+            let expDate: Date;
+            try {
+              expDate = new Date(item.expirationDate);
+              if (isNaN(expDate.getTime())) return false;
+            } catch (error) {
+              return false;
+            }
+            
+            return expDate <= today;
+          });
+          
+        } else if (expiring === 'no_expiration') {
+          filteredItems = filteredItems.filter((item: InventoryItem) => {
+            return !item.expirationDate;
+          });
+        }
+      }
+      
+      // Calculate pagination
+      const totalItems = filteredItems.length;
+      const totalPages = Math.ceil(totalItems / limit);
+      const startIndex = (page - 1) * limit;
+      const endIndex = Math.min(startIndex + limit, totalItems);
+      const paginatedItems = filteredItems.slice(startIndex, endIndex);
       
       res.json({
-        items,
+        items: paginatedItems,
         page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit)
+        totalPages,
+        totalItems
       });
     } catch (error) {
       next(error);
     }
   });
-  
   app.get("/api/inventory/:id", isAuthenticated, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);
@@ -537,6 +669,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next(error);
     }
   });
+
+  
   
   // Audit log routes (admin only)
   app.get("/api/audit-logs", isAdmin, async (req, res, next) => {

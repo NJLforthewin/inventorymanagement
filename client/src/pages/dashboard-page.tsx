@@ -13,15 +13,19 @@ import {
   XCircle,
   Edit,
   Plus,
-  Trash
+  Trash,
+  Clock
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 
 interface DashboardStats {
   totalItems: number;
   lowStockCount: number;
   recentlyAdded: number;
   outOfStock: number;
+  expiringSoon: number;
 }
 
 export default function DashboardPage() {
@@ -37,15 +41,25 @@ export default function DashboardPage() {
     queryKey: ["/api/dashboard/low-stock"],
   });
   
+  // Fetch out of stock items
+  const { data: outOfStockItems, isLoading: outOfStockLoading } = useQuery<InventoryItem[]>({
+    queryKey: ["/api/dashboard/out-of-stock"],
+  });
+
+  // Fetch soon to expire items
+  const { data: soonToExpireItems, isLoading: soonToExpireLoading } = useQuery<InventoryItem[]>({
+    queryKey: ["/api/inventory/soon-to-expire"],
+  });
+  
   // Fetch recent activity
   const { data: recentActivity, isLoading: activityLoading } = useQuery<AuditLog[]>({
     queryKey: ["/api/dashboard/activity"],
   });
 
-  // Table columns for low stock items
+  // Table columns
   const lowStockColumns = [
     {
-      header: "Item",
+      header: "Item Name",
       accessorKey: "name" as keyof InventoryItem,
     },
     {
@@ -90,13 +104,20 @@ export default function DashboardPage() {
           </span>
         );
       }
+    },
+    {
+      header: "Expiration Date",
+      accessorKey: "expirationDate" as keyof InventoryItem,
+      cell: (row: InventoryItem) => row.expirationDate 
+        ? format(new Date(row.expirationDate), 'MMM dd, yyyy')
+        : "No Expiration"
     }
   ];
 
   return (
     <AppLayout title="Dashboard">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
         <StatsCard
           title="Total Inventory Items"
           value={statsLoading ? "Loading..." : stats?.totalItems || 0}
@@ -140,13 +161,128 @@ export default function DashboardPage() {
           changeValue="5.3%"
           changeText="from last week"
         />
+        
+        <StatsCard
+          title="Expiring Soon"
+          value={statsLoading ? "Loading..." : stats?.expiringSoon || 0}
+          icon={<Clock className="h-6 w-6" />}
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-800"
+          changeDirection="up"
+          changeValue="2.1%"
+          changeText="from last week"
+        />
       </div>
 
-      {/* Recent Activity and Low Stock Tables */}
-      {user?.role === 'admin' ? (
-        // For admin users, show both activity and low stock in a 2-column layout
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-          {/* Recent Activity - Only visible to admin */}
+      {/* Tabs for different sections */}
+      <Tabs defaultValue="low-stock" className="mb-8">
+        <TabsList>
+          <TabsTrigger value="low-stock">Low Stock</TabsTrigger>
+          <TabsTrigger value="out-of-stock">Out of Stock</TabsTrigger>
+          <TabsTrigger value="expiring-soon">Expiring Soon</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="low-stock">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Low Stock Items</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {lowStockLoading ? (
+                <div className="text-center py-4">Loading low stock items...</div>
+              ) : lowStockItems && lowStockItems.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <DataTable
+                    columns={lowStockColumns}
+                    data={lowStockItems.slice(0, 5)}
+                    page={1}
+                    totalPages={1}
+                    onPageChange={() => {}}
+                  />
+                </div>
+              ) : (
+                <div className="text-center py-4">No low stock items</div>
+              )}
+            </CardContent>
+            <CardFooter className="bg-neutral-50 border-t">
+              <Link href="/inventory?status=low_stock" className="text-sm text-primary hover:text-primary/80 font-medium">
+                View all low stock items
+              </Link>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="out-of-stock">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Out of Stock Items</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {outOfStockLoading ? (
+                <div className="text-center py-4">Loading out of stock items...</div>
+              ) : outOfStockItems && outOfStockItems.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <DataTable
+                    columns={lowStockColumns}
+                    data={outOfStockItems.slice(0, 5)}
+                    page={1}
+                    totalPages={1}
+                    onPageChange={() => {}}
+                  />
+                </div>
+              ) : (
+                <div className="text-center py-4">No out of stock items</div>
+              )}
+            </CardContent>
+            <CardFooter className="bg-neutral-50 border-t">
+              <Link href="/inventory?status=out_of_stock" className="text-sm text-primary hover:text-primary/80 font-medium">
+                View all out of stock items
+              </Link>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+        
+        <TabsContent value="expiring-soon">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle>Items Expiring Soon</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {soonToExpireLoading ? (
+                <div className="text-center py-4">Loading soon to expire items...</div>
+              ) : soonToExpireItems && soonToExpireItems.length > 0 ? (
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {soonToExpireItems.map((item) => (
+                    <Card key={item.id} className="border-l-4 border-amber-500">
+                      <CardContent className="p-4">
+                        <div className="font-semibold mb-1">{item.name}</div>
+                        <div className="text-sm text-muted-foreground mb-2">
+                          ID: {item.itemId} • Stock: {item.currentStock} {item.unit}
+                        </div>
+                        <div className="text-sm font-medium text-amber-600 flex items-center">
+                          <Clock className="h-3 w-3 mr-1" />
+                          Expires: {item.expirationDate ? format(new Date(item.expirationDate), 'MMM dd, yyyy') : 'No expiration'}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-4">No items expiring soon</div>
+              )}
+            </CardContent>
+            <CardFooter className="bg-neutral-50 border-t">
+              <Link href="/inventory?expiring=soon" className="text-sm text-primary hover:text-primary/80 font-medium">
+                View all soon to expire items
+              </Link>
+            </CardFooter>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Recent Activity (only shown to admin users) */}
+      {user?.role === 'admin' && (
+        <div className="mt-8">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle>Recent Activity</CardTitle>
@@ -216,67 +352,6 @@ export default function DashboardPage() {
               </Link>
             </CardFooter>
           </Card>
-
-          {/* Low Stock Items */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle>Low Stock Items</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {lowStockLoading ? (
-                <div className="text-center py-4">Loading low stock items...</div>
-              ) : lowStockItems && lowStockItems.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <DataTable
-                    columns={lowStockColumns}
-                    data={lowStockItems.slice(0, 5)}
-                    page={1}
-                    totalPages={1}
-                    onPageChange={() => {}}
-                  />
-                </div>
-              ) : (
-                <div className="text-center py-4">No low stock items</div>
-              )}
-            </CardContent>
-            <CardFooter className="bg-neutral-50 border-t">
-              <Link href="/stock-alerts" className="text-sm text-primary hover:text-primary/80 font-medium">
-                View all low stock items
-              </Link>
-            </CardFooter>
-          </Card>
-        </div>
-      ) : (
-        // For non-admin users, show only low stock items in a single column
-        <div className="mt-8">
-          {/* Low Stock Items */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle>Low Stock Items</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {lowStockLoading ? (
-                <div className="text-center py-4">Loading low stock items...</div>
-              ) : lowStockItems && lowStockItems.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <DataTable
-                    columns={lowStockColumns}
-                    data={lowStockItems.slice(0, 5)}
-                    page={1}
-                    totalPages={1}
-                    onPageChange={() => {}}
-                  />
-                </div>
-              ) : (
-                <div className="text-center py-4">No low stock items</div>
-              )}
-            </CardContent>
-            <CardFooter className="bg-neutral-50 border-t">
-              <Link href="/stock-alerts" className="text-sm text-primary hover:text-primary/80 font-medium">
-                View all low stock items
-              </Link>
-            </CardFooter>
-          </Card>
         </div>
       )}
     </AppLayout>
@@ -298,7 +373,7 @@ function Minus(props: React.SVGProps<SVGSVGElement>) {
       strokeLinejoin="round"
       {...props}
     >
-      <line x1="5" y1="12" x2="19" y2="12"></line>
+      <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
   );
 }

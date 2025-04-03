@@ -1,7 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-
-// Add the API base URL
-const API_BASE_URL = "https://stockwell.onrender.com";
+import { API_BASE_URL } from "./config";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -15,7 +13,7 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
-  // Convert relative URLs to absolute URLs
+  // Use relative URLs for local development, absolute URLs for production
   const fullUrl = url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
   
   const res = await fetch(fullUrl, {
@@ -35,7 +33,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Convert relative URLs to absolute URLs
+    // Use relative URLs for local development, absolute URLs for production
     const url = queryKey[0] as string;
     const fullUrl = url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
     

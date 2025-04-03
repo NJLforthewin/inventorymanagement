@@ -52,6 +52,7 @@ export const inventoryItems = pgTable("inventory_items", {
   status: itemStatusEnum("status").notNull().default('in_stock'),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
+  expirationDate: timestamp('expiration_date'), // Add this line
 });
 
 // Audit Log Table
@@ -125,12 +126,22 @@ export const insertInventoryItemSchema = createInsertSchema(inventoryItems).omit
   createdAt: true, 
   updatedAt: true,
   status: true
+}).extend({
+  expirationDate: z.string().optional().refine(
+    (val) => !val || !isNaN(Date.parse(val)),
+    { message: "Invalid date format" }
+  ),
 });
 
 export const updateInventoryItemSchema = createInsertSchema(inventoryItems).omit({
   id: true,
   createdAt: true,
   updatedAt: true
+}).extend({
+  expirationDate: z.string().optional().refine(
+    (val) => !val || !isNaN(Date.parse(val)),
+    { message: "Invalid date format" }
+  ),
 }).partial();
 
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
