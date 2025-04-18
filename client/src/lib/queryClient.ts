@@ -1,6 +1,6 @@
-// queryClient.ts
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { API_BASE_URL } from "./config";
+import axios from "axios";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -29,6 +29,7 @@ export async function apiRequest(
     headers: data ? { "Content-Type": "application/json" } : {},
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
+    mode: "cors"
   });
 
   await throwIfResNotOk(res);
@@ -45,16 +46,18 @@ export const getQueryFn: <T>(options: {
     const url = queryKey[0] as string;
     const fullUrl = url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
     
-    const res = await fetch(fullUrl, {
-      credentials: "include",
-    });
-
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+    try {
+      // Using axios instead of fetch for better cookie handling
+      const response = await axios.get(fullUrl, {
+        withCredentials: true
+      });
+      return response.data;
+    } catch (error: any) {
+      if (unauthorizedBehavior === "returnNull" && error.response?.status === 401) {
+        return null;
+      }
+      throw error;
     }
-
-    await throwIfResNotOk(res);
-    return await res.json();
   };
 
 export const queryClient = new QueryClient({

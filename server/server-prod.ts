@@ -1,4 +1,3 @@
-// Updated server/server-prod.ts with proper TypeScript types
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { registerRoutes } from './routes.js';
@@ -19,6 +18,9 @@ app.use(cors({
   // Allow requests from your Netlify frontend domain or any origin during development
   origin: process.env.FRONTEND_URL || 'https://stockwell.netlify.app',
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Set-Cookie']
 }));
 
 // Add request logging middleware

@@ -6,10 +6,13 @@ import axios from "axios";
 // Define environment variables
 const API_URL = import.meta.env.VITE_API_URL || "";
 
-// Create axios instance
+// Create axios instance with specific config for cross-site cookies
 const api = axios.create({
   baseURL: API_URL,
-  withCredentials: true
+  withCredentials: true,
+  headers: {
+    "Content-Type": "application/json"
+  }
 });
 
 // Define User type
@@ -63,10 +66,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth();
   }, []);
   
-  // Login mutation
+  // Login mutation with enhanced cookie handling
   const loginMutation = useMutation({
     mutationFn: async (loginData: LoginUser) => {
-      const response = await api.post("/api/login", loginData);
+      // Use full config for better cookie handling
+      const response = await axios({
+        method: 'post',
+        url: `${API_URL}/api/login`,
+        data: loginData,
+        withCredentials: true,
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
       return response.data;
     },
     onSuccess: (data) => {
@@ -77,6 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       queryClient.invalidateQueries();
     },
     onError: (err: any) => {
+      console.error("Login error:", err);
       setError(err.response?.data?.message || "Login failed");
     }
   });

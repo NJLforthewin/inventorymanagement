@@ -31,7 +31,9 @@ export function setupAuth(app: Express) {
     store: storage.sessionStore,
     cookie: {
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 1 day
+      httpOnly: true
     }
   };
 
@@ -57,7 +59,6 @@ export function setupAuth(app: Express) {
       }
     }),
   );
-
   passport.serializeUser((user: Express.User, done) => done(null, user.id));
   passport.deserializeUser(async (id: number, done) => {
     try {
@@ -120,7 +121,15 @@ export function setupAuth(app: Express) {
   });
 
   app.get("/api/user", (req, res) => {
-    if (!req.isAuthenticated()) return res.sendStatus(401);
+    console.log("Auth check:", req.isAuthenticated(), req.user?.id, req.session.id);
+    
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ 
+        message: "Not authenticated", 
+        sessionExists: !!req.session,
+        sessionId: req.session?.id
+      });
+    }
     
     // Don't send the password to the client
     const { password, ...userWithoutPassword } = req.user!;
