@@ -9,6 +9,9 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Plus, Edit, User as UserIcon, UserX, CheckCircle, XCircle } from "lucide-react";
 import { format } from "date-fns";
+import { useAuth } from "@/hooks/use-auth"; // Import useAuth hook
+import axios from "axios"; // Import axios
+import { API_BASE_URL } from "@/lib/config"; // Import API_BASE_URL
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,19 +33,30 @@ interface UsersResponse {
 
 export default function UserManagementPage() {
   const { toast } = useToast();
+  const { token, getAuthHeader } = useAuth(); // Get token and auth header helper
   const [page, setPage] = useState(1);
   const [isAddFormOpen, setIsAddFormOpen] = useState(false);
   const [editUserId, setEditUserId] = useState<number | undefined>(undefined);
   const [deactivateUserId, setDeactivateUserId] = useState<number | undefined>(undefined);
 
-  // Fetch users
+  // Fetch users with token auth
   const { data: usersData, isLoading } = useQuery<UsersResponse>({
     queryKey: ["/api/users", page],
+    enabled: !!token, // Only run query if token exists
     queryFn: async () => {
-      return (await fetch(`/api/users?page=${page}`)).json();
+      // Use Axios with auth header for fetching users
+      const response = await axios.get(`${API_BASE_URL}/api/users?page=${page}`, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      return response.data;
     },
   });
 
+  // Add default empty users array to prevent null errors
+  const users = usersData?.users || [];
+   
   // Mutation for toggling user active status
   const toggleActiveMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -70,6 +84,12 @@ export default function UserManagementPage() {
     if (deactivateUserId) {
       toggleActiveMutation.mutate(deactivateUserId);
     }
+  };
+
+  // Find active user safely
+  const findUser = (id: number | undefined) => {
+    if (!id || !users) return undefined;
+    return users.find(u => u.id === id);
   };
 
   // Table columns
@@ -109,7 +129,7 @@ export default function UserManagementPage() {
         </span>
       )
     },
-    {
+     {
       header: "Department",
       accessorKey: "department" as keyof User,
     },
@@ -164,7 +184,7 @@ export default function UserManagementPage() {
       )
     }
   ];
-
+  
   return (
     <AppLayout title="User Management">
       <div className="flex justify-between mb-6">
@@ -186,7 +206,7 @@ export default function UserManagementPage() {
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <DataTable
           columns={columns}
-          data={usersData?.users || []}
+          data={users}
           page={page}
           totalPages={usersData?.totalPages || 1}
           onPageChange={setPage}
@@ -204,13 +224,13 @@ export default function UserManagementPage() {
         editUserId={editUserId}
       />
 
-      {/* Toggle Active Confirmation */}
+      {/* Toggle Active Confirmation - Fixed for safe access */}
       <AlertDialog open={!!deactivateUserId} onOpenChange={() => setDeactivateUserId(undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              {usersData?.users.find(u => u.id === deactivateUserId)?.active
+              {findUser(deactivateUserId)?.active
                 ? "This will deactivate the user account. The user will no longer be able to log in."
                 : "This will reactivate the user account. The user will be able to log in again."
               }
@@ -220,12 +240,12 @@ export default function UserManagementPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={confirmToggleActive}
-              className={usersData?.users.find(u => u.id === deactivateUserId)?.active
+              className={findUser(deactivateUserId)?.active
                 ? "bg-red-600 hover:bg-red-700"
                 : "bg-green-600 hover:bg-green-700"
               }
             >
-              {usersData?.users.find(u => u.id === deactivateUserId)?.active
+              {findUser(deactivateUserId)?.active
                 ? "Deactivate"
                 : "Activate"
               }

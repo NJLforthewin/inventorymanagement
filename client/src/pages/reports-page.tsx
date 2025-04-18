@@ -1,5 +1,3 @@
-// client/src/pages/reports-page.tsx
-
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -16,6 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DataTable } from "@/components/ui/data-table";
 import { InventoryItem, Department, Category } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth"; // Import useAuth hook
+import axios from "axios"; // Import axios
+import { API_BASE_URL } from "@/lib/config"; // Import API_BASE_URL
 
 type TimeRange = "7days" | "30days" | "90days" | "1year" | "all";
 
@@ -34,6 +35,7 @@ interface InventoryResponse {
 }
 
 export default function ReportsPage() {
+  const { token, getAuthHeader } = useAuth(); // Get token and auth header helper
   const [chartFilter, setChartFilter] = useState<ChartFilter>({
     timeRange: "30days",
   });
@@ -41,47 +43,82 @@ export default function ReportsPage() {
   const { toast } = useToast();
   const pageSize = 10; // Items per page for the report table
 
-  // Fetch departments
+  // Fetch departments with token auth
   const { data: departments } = useQuery<Department[]>({
     queryKey: ["/api/departments"],
+    enabled: !!token, // Only run query if token exists
+    queryFn: async () => {
+      const response = await axios.get(`${API_BASE_URL}/api/departments`, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      return response.data || [];
+    },
   });
 
-  // Fetch categories
+  // Fetch categories with token auth
   const { data: categories } = useQuery<Category[]>({
     queryKey: ["/api/categories"],
+    enabled: !!token, // Only run query if token exists
+    queryFn: async () => {
+      const response = await axios.get(`${API_BASE_URL}/api/categories`, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      return response.data || [];
+    },
   });
 
-  // Fetch dashboard stats
+  // Fetch dashboard stats with token auth
   const { data: stats } = useQuery({
     queryKey: ["/api/dashboard/stats"],
+    enabled: !!token, // Only run query if token exists
+    queryFn: async () => {
+      const response = await axios.get(`${API_BASE_URL}/api/dashboard/stats`, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      return response.data;
+    },
   });
 
-  // Fetch chart data (all items, since we need them for the charts)
+  // Fetch chart data (all items) with token auth
   const { data: allInventoryData } = useQuery<InventoryResponse>({
     queryKey: ["/api/inventory", 1, { limit: 1000 }],
+    enabled: !!token, // Only run query if token exists
     queryFn: async () => {
-      const url = `/api/inventory?page=1&limit=1000`;
-      return (await fetch(url)).json();
+      const response = await axios.get(`${API_BASE_URL}/api/inventory?page=1&limit=1000`, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      return response.data;
     },
   });
 
-  // Fetch paginated data for the report table
+  // Fetch paginated data for the report table with token auth
   const { data: reportInventoryData, isLoading: isReportLoading } = useQuery<InventoryResponse>({
     queryKey: ["/api/inventory/report", page, pageSize],
+    enabled: !!token, // Only run query if token exists
     queryFn: async () => {
-      const url = `/api/inventory?page=${page}&limit=${pageSize}`;
-      console.log(`Fetching report data: ${url}`);
-      const response = await fetch(url);
-      const data = await response.json();
-      console.log("Report API response:", data);
-      return data;
+      console.log(`Fetching report data: page ${page}, limit ${pageSize}`);
+      const response = await axios.get(`${API_BASE_URL}/api/inventory?page=${page}&limit=${pageSize}`, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      console.log("Report API response:", response.data);
+      return response.data;
     },
   });
 
-  // Data for charts
+  // Data for charts with safe access
   const allItems = allInventoryData?.items || [];
   
-  // Data for report table
+  // Data for report table with safe access
   const reportItems = reportInventoryData?.items || [];
   const totalPages = reportInventoryData?.totalPages || 1;
   const currentPage = reportInventoryData?.page || page;
@@ -188,9 +225,9 @@ export default function ReportsPage() {
     console.log("Applying filters:", chartFilter);
   };
 
-  // Handle export report
+  // Handle export report with token auth
   const handleExportReport = () => {
-    // In a real implementation, this would generate a CSV/PDF report
+    // In a real implementation, this would generate a CSV/PDF report with authentication
     toast({
       title: "Export started",
       description: "Your report is being prepared for download",
@@ -295,29 +332,35 @@ export default function ReportsPage() {
           </CardHeader>
           <CardContent>
             <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={departmentData}
-                  margin={{
-                    top: 20,
-                    right: 30,
-                    left: 20,
-                    bottom: 60,
-                  }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="name" 
-                    angle={-45} 
-                    textAnchor="end" 
-                    height={60}
-                    tick={{ fontSize: 12 }}
-                  />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#0078D4" name="Item Count" />
-                </BarChart>
-              </ResponsiveContainer>
+              {departmentData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={departmentData}
+                    margin={{
+                      top: 20,
+                      right: 30,
+                      left: 20,
+                      bottom: 60,
+                    }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      dataKey="name" 
+                      angle={-45} 
+                      textAnchor="end" 
+                      height={60}
+                      tick={{ fontSize: 12 }}
+                    />
+                    <YAxis />
+                    <Tooltip />
+                    <Bar dataKey="count" fill="#0078D4" name="Item Count" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-500">No data available</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -331,27 +374,33 @@ export default function ReportsPage() {
           </CardHeader>
           <CardContent>
             <div className="h-80">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={statusData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    outerRadius={100}
-                    fill="#8884d8"
-                    dataKey="value"
-                    nameKey="name"
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                  >
-                    {statusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+              {statusData.some(item => item.value > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statusData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      outerRadius={100}
+                      fill="#8884d8"
+                      dataKey="value"
+                      nameKey="name"
+                      label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {statusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-gray-500">No data available</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -17,6 +17,9 @@ import {
 } from "lucide-react";
 import { AuditLog, User as UserType } from "@shared/schema";
 import { formatDistanceToNow, format } from "date-fns";
+import { useAuth } from "@/hooks/use-auth"; // Import useAuth hook
+import axios from "axios"; // Import axios
+import { API_BASE_URL } from "@/lib/config"; // Import API_BASE_URL
 import {
   Select,
   SelectContent,
@@ -44,24 +47,30 @@ interface AuditLogFilters {
 }
 
 export default function AuditLogPage() {
+  const { token, getAuthHeader } = useAuth(); // Get token and auth header helper
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<AuditLogFilters>({});
 
-  // Fetch users for filter
+  // Fetch users for filter with token auth
   const { data: users } = useQuery<UserType[]>({
     queryKey: ["/api/users", { limit: 100 }],
+    enabled: !!token, // Only run if token exists
     queryFn: async () => {
-      const response = await fetch("/api/users?limit=100");
-      const data = await response.json();
-      return data.users;
+      const response = await axios.get(`${API_BASE_URL}/api/users?limit=100`, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      return response.data.users || [];
     },
   });
 
-  // Fetch audit logs
+  // Fetch audit logs with token auth
   const { data: auditLogData, isLoading } = useQuery<AuditLogResponse>({
     queryKey: ["/api/audit-logs", page, filters],
+    enabled: !!token, // Only run if token exists
     queryFn: async () => {
-      let url = `/api/audit-logs?page=${page}`;
+      let url = `${API_BASE_URL}/api/audit-logs?page=${page}`;
       
       if (filters.userId) url += `&userId=${filters.userId}`;
       if (filters.activityType) url += `&activityType=${filters.activityType}`;
@@ -70,7 +79,12 @@ export default function AuditLogPage() {
       if (filters.startDate) url += `&startDate=${filters.startDate?.toISOString()}`;
       if (filters.endDate) url += `&endDate=${filters.endDate?.toISOString()}`;
       
-      return (await fetch(url)).json();
+      const response = await axios.get(url, {
+        headers: {
+          ...getAuthHeader()
+        }
+      });
+      return response.data;
     },
   });
 
@@ -86,11 +100,11 @@ export default function AuditLogPage() {
 
   // Handle export
   const handleExport = () => {
-    // In a real app, this would generate a CSV/Excel file
+    // In a real app, this would generate a CSV/Excel file with token auth
     console.log("Exporting audit logs");
   };
 
-  // Get user name by ID
+  // Get user name by ID with safe access
   const getUserName = (id: number) => {
     const user = users?.find(u => u.id === id);
     return user ? user.name : `User #${id}`;
@@ -119,6 +133,9 @@ export default function AuditLogPage() {
       default: return <History className="h-4 w-4 text-gray-500" />;
     }
   };
+
+  // Safe access to logs
+  const logs = auditLogData?.logs || [];
 
   // Table columns
   const columns = [
@@ -152,8 +169,7 @@ export default function AuditLogPage() {
           {row.details}
         </div>
       )
-    },
-    {
+    },  {
       header: "Item ID",
       accessorKey: "itemId" as keyof AuditLog,
       cell: (row: AuditLog) => {
@@ -199,7 +215,7 @@ export default function AuditLogPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-4">
-            <div className="w-full sm:w-auto">
+                <div className="w-full sm:w-auto">
               <Select 
                 value={filters.userId?.toString() ||"all" }
                 onValueChange={(value) => 
@@ -214,23 +230,23 @@ export default function AuditLogPage() {
                 </SelectTrigger>
                 <SelectContent>
                 <SelectItem value="all">All Users</SelectItem>
-        {users?.map((user) => (
-          <SelectItem key={user.id} value={user.id.toString()}>
-            {user.name}
-          </SelectItem>
-                  ))}
+                {users?.map((user) => (
+                  <SelectItem key={user.id} value={user.id.toString()}>
+                    {user.name}
+                  </SelectItem>
+                ))}
                 </SelectContent>
               </Select>
             </div>
             
             <div className="w-full sm:w-auto">
             <Select 
-      value={filters.activityType || "all"}
-      onValueChange={(value) => 
-        setFilters({ 
-          ...filters, 
-          activityType: value !== "all" ? value : undefined 
-        })
+                value={filters.activityType || "all"}
+                onValueChange={(value) => 
+                  setFilters({ 
+                    ...filters, 
+                    activityType: value !== "all" ? value : undefined 
+                  })
                 }
               >
                 <SelectTrigger className="w-full min-w-[200px]">
@@ -246,7 +262,6 @@ export default function AuditLogPage() {
                 </SelectContent>
               </Select>
             </div>
-            
             <div className="w-full sm:w-auto">
               <Popover>
                 <PopoverTrigger asChild>
@@ -276,7 +291,7 @@ export default function AuditLogPage() {
                           })
                         }
                         initialFocus
-                      />
+                    />
                     </div>
                     <div className="border-l">
                       <p className="p-2 text-sm font-medium">End Date</p>
@@ -317,7 +332,7 @@ export default function AuditLogPage() {
       {/* Audit Log Table */}
       <DataTable
         columns={columns}
-        data={auditLogData?.logs || []}
+        data={logs}
         page={page}
         totalPages={auditLogData?.totalPages || 1}
         onPageChange={setPage}

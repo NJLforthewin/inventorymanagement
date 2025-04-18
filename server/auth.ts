@@ -157,13 +157,13 @@ export function setupAuth(app: Express) {
 
 // Middleware to check if user is authenticated
 export function isAuthenticated(req: Request, res: Response, next: NextFunction) {
+  // This will work with our new token system
   if ((req as any).user) {
     return next();
   }
   res.status(401).json({ message: "Unauthorized" });
 }
-
-// Middleware to check if user is admin
+// Middleware to check if user is admin with token auth
 export function isAdmin(req: Request, res: Response, next: NextFunction) {
   if ((req as any).user && (req as any).user.role === 'admin') {
     return next();
