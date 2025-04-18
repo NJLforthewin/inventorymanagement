@@ -6,14 +6,16 @@ import axios from "axios";
 // Define environment variables
 const API_URL = import.meta.env.VITE_API_URL || "";
 
-// Create axios instance with specific config for cross-site cookies
-const api = axios.create({
-  baseURL: API_URL,
-  withCredentials: true,
-  headers: {
-    "Content-Type": "application/json"
-  }
-});
+// Create axios instance with token auth
+const createApiInstance = (token?: string) => {
+  return axios.create({
+    baseURL: API_URL,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { "Authorization": `Bearer ${token}` } : {})
+    }
+  });
+};
 
 // Define User type
 interface User {
@@ -31,14 +33,17 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   error: string | null;
+  token: string | null;
   loginMutation: any;
   logout: () => void;
+  getAuthHeader: () => { Authorization: string } | {};
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(localStorage.getItem('auth_token'));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -47,45 +52,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Check authentication status on mount
   useEffect(() => {
     const checkAuth = async () => {
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+      
       try {
         setIsLoading(true);
+        const api = createApiInstance(token);
         const response = await api.get("/api/user");
         
         if (response.data) {
           setUser(response.data);
-          // Clear the expiration alert flag to ensure it shows on fresh login
-          sessionStorage.removeItem('expirationAlertShown');
         }
       } catch (err) {
         console.error("Auth check failed:", err);
+        // Clear invalid token
+        localStorage.removeItem('auth_token');
+        setToken(null);
       } finally {
         setIsLoading(false);
       }
     };
         
     checkAuth();
-  }, []);
+  }, [token]);
   
-  // Login mutation with enhanced cookie handling
+  // Login mutation with token auth
   const loginMutation = useMutation({
     mutationFn: async (loginData: LoginUser) => {
-      // Use full config for better cookie handling
-      const response = await axios({
-        method: 'post',
-        url: `${API_URL}/api/login`,
-        data: loginData,
-        withCredentials: true,
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      const api = createApiInstance();
+      const response = await api.post("/api/login", loginData);
       return response.data;
     },
     onSuccess: (data) => {
-      setUser(data);
+      setUser(data.user);
+      setToken(data.token);
+      localStorage.setItem('auth_token', data.token);
       setError(null);
-      // Clear the expiration alert flag to ensure it shows on login
-      sessionStorage.removeItem('expirationAlertShown');
       queryClient.invalidateQueries();
     },
     onError: (err: any) => {
@@ -97,18 +101,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Logout function
   const logout = async () => {
     try {
-      await api.post("/api/logout");
-      setUser(null);
-      // Clear the expiration alert flag when logging out
-      sessionStorage.removeItem('expirationAlertShown');
-      queryClient.clear();
+      if (token) {
+        const api = createApiInstance(token);
+        await api.post("/api/logout");
+      }
     } catch (err) {
       console.error("Logout failed:", err);
+    } finally {
+      localStorage.removeItem('auth_token');
+      setToken(null);
+      setUser(null);
+      queryClient.clear();
     }
   };
   
+  // Helper function to get auth header
+  const getAuthHeader = () => {
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+  
   return (
-    <AuthContext.Provider value={{ user, isLoading, error, loginMutation, logout }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      isLoading, 
+      error, 
+      token,
+      loginMutation, 
+      logout,
+      getAuthHeader
+    }}>
       {children}
     </AuthContext.Provider>
   );

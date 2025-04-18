@@ -2,19 +2,8 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { API_BASE_URL } from "./config";
 import axios from "axios";
 
-async function throwIfResNotOk(res: Response) {
-  if (!res.ok) {
-    try {
-      // Try to parse JSON error response
-      const errorData = await res.json();
-      throw new Error(`${res.status}: ${errorData.message || JSON.stringify(errorData)}`);
-    } catch (e) {
-      // If not JSON, use text
-      const text = await res.text() || res.statusText;
-      throw new Error(`${res.status}: ${text}`);
-    }
-  }
-}
+// Helper to get auth token from localStorage
+const getAuthToken = () => localStorage.getItem('auth_token');
 
 export async function apiRequest(
   method: string,
@@ -24,16 +13,24 @@ export async function apiRequest(
   // Use relative URLs for local development, absolute URLs for production
   const fullUrl = url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
   
-  const res = await fetch(fullUrl, {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    ...(data ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+  };
+  
+  const response = await fetch(fullUrl, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-    mode: "cors"
   });
-
-  await throwIfResNotOk(res);
-  return res;
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ message: response.statusText }));
+    throw new Error(errorData.message || `Request failed with status ${response.status}`);
+  }
+  
+  return response;
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
@@ -46,10 +43,14 @@ export const getQueryFn: <T>(options: {
     const url = queryKey[0] as string;
     const fullUrl = url.startsWith("http") ? url : `${API_BASE_URL}${url}`;
     
+    // Get the auth token
+    const token = getAuthToken();
+    
     try {
-      // Using axios instead of fetch for better cookie handling
       const response = await axios.get(fullUrl, {
-        withCredentials: true
+        headers: token ? { 
+          Authorization: `Bearer ${token}` 
+        } : {}
       });
       return response.data;
     } catch (error: any) {
