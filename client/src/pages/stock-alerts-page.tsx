@@ -17,8 +17,17 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
+// Define the response type
+interface LowStockResponse {
+  items: InventoryItem[];
+  page: number;
+  totalPages: number;
+  totalItems: number;
+}
+
 export default function StockAlertsPage() {
   const { toast } = useToast();
+  const [page, setPage] = useState(1);
   const [stockItemId, setStockItemId] = useState<number | undefined>(undefined);
   const [stockQuantity, setStockQuantity] = useState<number>(0);
 
@@ -33,9 +42,17 @@ export default function StockAlertsPage() {
   });
 
   // Fetch low stock items
-  const { data: lowStockItems, isLoading } = useQuery<InventoryItem[]>({
-    queryKey: ["/api/dashboard/low-stock"],
+  const { data: lowStockData, isLoading } = useQuery<LowStockResponse>({
+    queryKey: ["/api/dashboard/low-stock", page],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/dashboard/low-stock?page=${page}&limit=5`);
+      return response.json();
+    }
   });
+
+  // Extract items from the response
+  const lowStockItems = lowStockData?.items || [];
+  const totalPages = lowStockData?.totalPages || 1;
 
   // Mutation for updating stock
   const updateStockMutation = useMutation({
@@ -155,8 +172,9 @@ export default function StockAlertsPage() {
     }
   ];
 
-  const criticalItems = lowStockItems?.filter(item => item.status === "out_of_stock") || [];
-  const lowItems = lowStockItems?.filter(item => item.status === "low_stock") || [];
+  // Since lowStockItems is now an array, we can filter it directly
+  const criticalItems = lowStockItems.filter(item => item.status === "out_of_stock");
+  const lowItems = lowStockItems.filter(item => item.status === "low_stock");
 
   return (
     <AppLayout title="Stock Alerts">
@@ -196,10 +214,10 @@ export default function StockAlertsPage() {
         </div>
         <DataTable
           columns={columns}
-          data={lowStockItems || []}
-          page={1}
-          totalPages={1}
-          onPageChange={() => {}}
+          data={lowStockItems}
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
           isLoading={isLoading}
         />
       </div>

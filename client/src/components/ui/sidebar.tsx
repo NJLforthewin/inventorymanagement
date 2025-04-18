@@ -21,19 +21,30 @@ interface SidebarProps {
   setMobileSidebarOpen: (open: boolean) => void;
 }
 
+// Define the response type
+interface LowStockResponse {
+  items: InventoryItem[];
+  page: number;
+  totalPages: number;
+  totalItems: number;
+}
+
 export function Sidebar({ isMobileSidebarOpen, setMobileSidebarOpen }: SidebarProps) {
   const [location] = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // Query to fetch low stock items
-  const { data: lowStockItems } = useQuery<InventoryItem[]>({
+  // Query to fetch low stock items - updated to handle the new response format
+  const { data: lowStockData } = useQuery<LowStockResponse>({
     queryKey: ["/api/dashboard/low-stock"],
   });
 
+  // Extract items array from the response
+  const lowStockItems = lowStockData?.items || [];
+  
   // Calculate counts of critical and low stock items
-  const criticalItems = lowStockItems?.filter(item => item.status === "out_of_stock") || [];
-  const lowItems = lowStockItems?.filter(item => item.status === "low_stock") || [];
+  const criticalItems = lowStockItems.filter((item: InventoryItem) => item.status === "out_of_stock") || [];
+  const lowItems = lowStockItems.filter((item: InventoryItem) => item.status === "low_stock") || [];
   const totalAlertCount = (criticalItems.length + lowItems.length) || 0;
 
   // Close sidebar on route change on mobile
@@ -47,7 +58,7 @@ export function Sidebar({ isMobileSidebarOpen, setMobileSidebarOpen }: SidebarPr
     { href: "/stock-alerts", label: "Stock Alerts", icon: <AlertTriangle className="w-6" /> },
     { href: "/reports", label: "Reports", icon: <FileText className="w-6" /> },
   ];
-
+  
   const adminNavItems = [
     { href: "/users", label: "User Management", icon: <Users className="w-6" /> },
     { href: "/departments", label: "Departments", icon: <Building className="w-6" /> },
@@ -79,7 +90,6 @@ export function Sidebar({ isMobileSidebarOpen, setMobileSidebarOpen }: SidebarPr
             <X size={20} />
           </button>
         </div>
-        
         <nav className="mt-5 px-2">
           <div className="space-y-1">
             {navItems.map((item) => (
@@ -105,7 +115,6 @@ export function Sidebar({ isMobileSidebarOpen, setMobileSidebarOpen }: SidebarPr
                 )}
               </Link>
             ))}
-            
             {/* Admin-only menu items */}
             {isAdmin && (
               <>

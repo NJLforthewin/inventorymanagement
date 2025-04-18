@@ -1,4 +1,4 @@
-import { useState, ReactNode } from "react";  // Remove useEffect if not using it
+import { useState, ReactNode } from "react";
 import { Sidebar, MobileSidebarToggle } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { ChevronDown, LogOut } from "lucide-react";
@@ -23,7 +23,7 @@ interface AppLayoutProps {
 
 export function AppLayout({ children, title }: AppLayoutProps) {
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false); // Add this state for DropdownMenu
+  // Removed the isMenuOpen state as we don't need it anymore
   const { user, logout } = useAuth();
   const { toast } = useToast();
   
@@ -67,8 +67,8 @@ export function AppLayout({ children, title }: AppLayoutProps) {
                 {isAdmin ? "Admin" : "Staff"}
               </div>
             </div>
-            {/* Updated DropdownMenu with controlled state */}
-            <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+            {/* Fixed DropdownMenu - removed controlled state */}
+            <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center space-x-1 text-neutral-600 hover:text-primary focus:outline-none">
                   <span className="hidden md:block">{user?.name}</span>

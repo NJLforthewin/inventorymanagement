@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatsCard } from "@/components/ui/stats-card";
@@ -19,6 +20,7 @@ import {
 import { formatDistanceToNow, format } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { apiRequest } from "@/lib/queryClient";
 
 interface DashboardStats {
   totalItems: number;
@@ -28,23 +30,57 @@ interface DashboardStats {
   expiringSoon: number;
 }
 
+// Define response interfaces for paginated data
+interface LowStockResponse {
+  items: InventoryItem[];
+  page: number;
+  totalPages: number;
+  totalItems: number;
+}
+
+interface OutOfStockResponse {
+  items: InventoryItem[];
+  page: number;
+  totalPages: number;
+  totalItems: number;
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
+  
+  // Add state for pagination
+  const [lowStockPage, setLowStockPage] = useState(1);
+  const [outOfStockPage, setOutOfStockPage] = useState(1);
   
   // Fetch dashboard stats
   const { data: stats, isLoading: statsLoading } = useQuery<DashboardStats>({
     queryKey: ["/api/dashboard/stats"],
   });
   
-  // Fetch low stock items
-  const { data: lowStockItems, isLoading: lowStockLoading } = useQuery<InventoryItem[]>({
-    queryKey: ["/api/dashboard/low-stock"],
+  // Fetch low stock items - updated for pagination
+  const { data: lowStockData, isLoading: lowStockLoading } = useQuery<LowStockResponse>({
+    queryKey: ["/api/dashboard/low-stock-dashboard", lowStockPage],
+    queryFn: async () => {
+      // Use limit=5 to get only 5 items per page in dashboard preview
+      const response = await apiRequest("GET", `/api/dashboard/low-stock?page=${lowStockPage}&limit=5`);
+      return response.json();
+    }
   });
   
+  // Get items array from response
+  const lowStockItems = lowStockData?.items || [];
+  
   // Fetch out of stock items
-  const { data: outOfStockItems, isLoading: outOfStockLoading } = useQuery<InventoryItem[]>({
-    queryKey: ["/api/dashboard/out-of-stock"],
+  const { data: outOfStockData, isLoading: outOfStockLoading } = useQuery<OutOfStockResponse>({
+    queryKey: ["/api/dashboard/out-of-stock-dashboard", outOfStockPage],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/dashboard/out-of-stock?page=${outOfStockPage}&limit=5`);
+      return response.json();
+    }
   });
+  
+  // Get items array from response
+  const outOfStockItems = outOfStockData?.items || [];
 
   // Fetch soon to expire items
   const { data: soonToExpireItems, isLoading: soonToExpireLoading } = useQuery<InventoryItem[]>({
@@ -194,10 +230,11 @@ export default function DashboardPage() {
                 <div className="overflow-x-auto">
                   <DataTable
                     columns={lowStockColumns}
-                    data={lowStockItems.slice(0, 5)}
-                    page={1}
-                    totalPages={1}
-                    onPageChange={() => {}}
+                    data={lowStockItems}
+                    page={lowStockPage}
+                    totalPages={lowStockData?.totalPages || 1}
+                    onPageChange={setLowStockPage}
+                    isLoading={lowStockLoading}
                   />
                 </div>
               ) : (
@@ -205,7 +242,7 @@ export default function DashboardPage() {
               )}
             </CardContent>
             <CardFooter className="bg-neutral-50 border-t">
-              <Link href="/inventory?status=low_stock" className="text-sm text-primary hover:text-primary/80 font-medium">
+              <Link href="/stock-alerts" className="text-sm text-primary hover:text-primary/80 font-medium">
                 View all low stock items
               </Link>
             </CardFooter>
@@ -224,10 +261,11 @@ export default function DashboardPage() {
                 <div className="overflow-x-auto">
                   <DataTable
                     columns={lowStockColumns}
-                    data={outOfStockItems.slice(0, 5)}
-                    page={1}
-                    totalPages={1}
-                    onPageChange={() => {}}
+                    data={outOfStockItems}
+                    page={outOfStockPage}
+                    totalPages={outOfStockData?.totalPages || 1}
+                    onPageChange={setOutOfStockPage}
+                    isLoading={outOfStockLoading}
                   />
                 </div>
               ) : (

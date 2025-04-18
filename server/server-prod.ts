@@ -1,471 +1,57 @@
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import cors from "cors";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
-import { initDb } from './db-postgres';
-import { setupAuth } from './auth';
-import MemoryStore from 'memorystore';
-import session from "express-session";
-import passport from "passport";
-import 'dotenv/config';
+// Updated server/server-prod.ts with proper TypeScript types
+import express, { Request, Response, NextFunction } from 'express';
+import cors from 'cors';
+import { registerRoutes } from './routes.js';
+import dotenv from 'dotenv';
 
-// Add this type declaration for session.user
-declare module 'express-session' {
-  interface SessionData {
-    user: {
-      id: number;
-      username: string;
-      name: string;
-      role: string;
-      department: string;
-    };
-  }
-}
+// Load environment variables
+dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const SessionStore = MemoryStore(session);
-
-// Simple logging function
-function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
-
+// Initialize Express app
 const app = express();
+const PORT = process.env.PORT || 8080;
 
-// Set trust proxy
-app.set("trust proxy", 1);
+// Middleware
+app.use(express.json());
 
-// CORS middleware with expanded configuration
+// Configure CORS for production
 app.use(cors({
-  origin: [
-    "https://stockwell.netlify.app", 
-    "http://localhost:3000", 
-    "http://localhost:5000", 
-    "http://localhost:5173"
-  ],
+  // Allow requests from your Netlify frontend domain or any origin during development
+  origin: process.env.FRONTEND_URL || '*',
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-
-// Logging middleware with enhanced debugging
+// Add request logging middleware
 app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  
-  // Log request headers for debugging
-  console.log(`${new Date().toISOString()} Request: ${req.method} ${req.path}`);
-  console.log('Request headers:', {
-    origin: req.headers.origin,
-    referer: req.headers.referer,
-    cookie: req.headers.cookie ? '[PRESENT]' : '[ABSENT]'
-  });
-  
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  // Ensure CORS headers are set correctly
-  res.header('Access-Control-Allow-Credentials', 'true');
-  if (req.headers.origin) {
-    res.header('Access-Control-Allow-Origin', req.headers.origin);
-  }
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        const respStr = JSON.stringify(capturedJsonResponse);
-        logLine += ` :: ${respStr.length > 100 ? respStr.slice(0, 100) + '...' : respStr}`;
-      }
-
-      
-
-      log(logLine);
-      
-      // Log response headers for debugging
-      console.log('Response headers:', {
-        'set-cookie': res.getHeader('set-cookie') ? '[PRESENT]' : '[ABSENT]',
-        'access-control-allow-origin': res.getHeader('access-control-allow-origin'),
-        'access-control-allow-credentials': res.getHeader('access-control-allow-credentials')
-      });
-    }
-  });
-
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
 });
 
-// Session configuration - MUST be before setupAuth and registerRoutes
-const isProduction = process.env.NODE_ENV === 'production';
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'hospital-inventory-secret-key',
-  resave: false,
-  saveUninitialized: false,
-  store: new SessionStore({ 
-    checkPeriod: 86400000 // prune expired entries every 24h
-  }),
-  cookie: {
-    secure: true, // Always use secure cookies in production
-    sameSite: 'none', // Required for cross-domain cookies
-    maxAge: 24 * 60 * 60 * 1000,
-    path: '/'
-  }
-}));
-
-// Initialize passport here, before routes
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Add health check endpoint FIRST so it's available immediately
-app.get("/health", (req, res) => {
-  res.status(200).json({ 
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV || 'development'
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    environment: 'production', 
+    timestamp: new Date().toISOString() 
   });
 });
 
-// Add debug endpoint to check database connection
-app.get("/api/debug/db-connection", (req, res) => {
-  // Mask password in URL for security
-  const dbUrl = process.env.DATABASE_URL || 'not set';
-  const maskedUrl = dbUrl.replace(/:[^:@]+@/, ':***@');
-  
-  res.json({
-    database_url: maskedUrl,
-    ssl_enabled: true,
-    ssl_mode: 'with rejectUnauthorized: false',
-    node_env: process.env.NODE_ENV || 'not set',
-    timestamp: new Date().toISOString()
+// Register all routes
+registerRoutes(app);
+
+// Error handling middleware with proper types
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  console.error(`Error: ${err.message}`);
+  console.error(err.stack);
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.message
   });
 });
 
-// Add debug endpoint to test database connection directly
-app.get("/api/debug/db-test", async (req, res) => {
-  try {
-    // Import the db module
-    const { db } = await import('./db-postgres');
-    
-    // Use initDb directly
-    const dbInitResult = await import('./db-postgres').then(module => module.initDb());
-    
-    res.json({
-      success: true,
-      message: "Database connection successful",
-      init_result: dbInitResult,
-      timestamp: new Date().toISOString()
-    });
-  } catch (err) {
-    // Cast the unknown error to Error type
-    const error = err as Error & { code?: string };
-    
-    res.status(500).json({
-      success: false,
-      message: "Database connection failed",
-      error: error.message,
-      code: error.code,
-      stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
-      timestamp: new Date().toISOString()
-    });
-  }
+// Start the server
+app.listen(PORT, () => {
+  console.log(`Server running in production mode on port ${PORT}`);
 });
 
-// Add debug endpoint to create users
-app.post("/api/direct-seed", async (req, res) => {
-  try {
-    console.log('Creating admin and staff users directly...');
-    
-    // Import necessary modules
-    const { db } = await import('./db-postgres');
-    const { hashPassword } = await import('./utils/password');
-    const { sql } = await import('drizzle-orm');
-    
-    // Generate passwords
-    const adminPassword = await hashPassword('admin123');
-    const staffPassword = await hashPassword('staff123');
-    
-    // Insert admin user
-    await db.execute(sql`
-      INSERT INTO users (name, username, email, password, role, department, active, created_at)
-      VALUES ('Admin User', 'admin', 'admin@hospital.org', ${adminPassword}, 'admin', 'Administration', true, NOW())
-      ON CONFLICT (username) DO UPDATE SET password = ${adminPassword}
-    `);
-    
-    // Insert staff user
-    await db.execute(sql`
-      INSERT INTO users (name, username, email, password, role, department, active, created_at)
-      VALUES ('Staff User', 'staff', 'staff@hospital.org', ${staffPassword}, 'staff', 'Emergency', true, NOW())
-      ON CONFLICT (username) DO UPDATE SET password = ${staffPassword}
-    `);
-    
-    // Insert departments
-    await db.execute(sql`
-      INSERT INTO departments (name, description, created_at)
-      VALUES 
-        ('Emergency', 'Emergency department', NOW()),
-        ('Surgery', 'Surgery department', NOW()),
-        ('Pediatrics', 'Pediatrics department', NOW()),
-        ('Cardiology', 'Cardiology department', NOW()),
-        ('General', 'General department', NOW())
-      ON CONFLICT (name) DO NOTHING
-    `);
-    
-    // Verify users were created
-    const userCount = await db.execute(sql`SELECT COUNT(*) as count FROM users`);
-    
-    res.status(200).json({
-      success: true,
-      message: "Users created successfully",
-      userCount: userCount[0].count
-    });
-  } catch (err) {
-    const error = err as Error;
-    console.error('User creation error:', error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to create users",
-      error: error.message
-    });
-  }
-});
-
-// Add a GET endpoint to verify users exist
-app.get("/api/check-users", async (req, res) => {
-  try {
-    const { db } = await import('./db-postgres');
-    const { sql } = await import('drizzle-orm');
-    
-    const users = await db.execute(sql`SELECT id, username, name, role FROM users`);
-    
-    res.status(200).json({
-      success: true,
-      userCount: users.length,
-      users: users
-    });
-  } catch (err) {
-    const error = err as Error;
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Add direct login endpoint
-app.post("/api/direct-login", async (req, res) => {
-  try {
-    console.log('Direct login attempt:', req.body);
-    
-    // Import necessary modules
-    const { db } = await import('./db-postgres');
-    const { comparePasswords } = await import('./utils/password');
-    const { sql } = await import('drizzle-orm');
-    
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Username and password are required' 
-      });
-    }
-    
-    // Get user from database
-    const users = await db.execute(
-      sql`SELECT * FROM users WHERE username = ${username}`
-    );
-    
-    if (!users || users.length === 0) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid username or password' 
-      });
-    }
-    
-    const user = users[0];
-    
-    // Check password (with proper type casting)
-    const passwordMatch = await comparePasswords(password, user.password as string);
-    
-    if (!passwordMatch) {
-      return res.status(401).json({ 
-        success: false, 
-        message: 'Invalid username or password' 
-      });
-    }
-    
-    // Create a session manually
-    if (req.session) {
-      // Store user info in session (don't include password) with type casting
-      req.session.user = {
-        id: Number(user.id),
-        username: String(user.username),
-        name: String(user.name),
-        role: String(user.role),
-        department: String(user.department)
-      };
-      
-      console.log('Session created:', req.sessionID);
-      
-      // Return success
-      return res.status(200).json({
-        success: true,
-        message: 'Login successful',
-        user: {
-          id: Number(user.id),
-          username: String(user.username),
-          name: String(user.name),
-          role: String(user.role),
-          department: String(user.department)
-        }
-      });
-    } else {
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to create session'
-      });
-    }
-  } catch (err) {
-    const error = err as Error;
-    console.error('Direct login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Login failed',
-      error: error.message
-    });
-  }
-});
-
-// Direct endpoint to check user session
-app.get("/api/direct-user", (req, res) => {
-  console.log('Direct user check');
-  console.log('Session ID:', req.sessionID);
-  console.log('Session data:', req.session);
-  
-  if (req.session && req.session.user) {
-    return res.status(200).json({
-      success: true,
-      user: req.session.user
-    });
-  } else {
-    return res.status(401).json({
-      success: false,
-      message: 'Not authenticated'
-    });
-  }
-});
-
-// Start the server FIRST, before database connection
-const port = parseInt(process.env.PORT || "5000", 10);
-const httpServer = app.listen(port, "0.0.0.0", () => {
-  log(`API server started on port ${port}. Now connecting to database...`);
-});
-
-// THEN connect to database and register routes
-(async () => {
-  try {
-    // Initialize database with a timeout
-    const dbConnectPromise = initDb();
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("Database connection timeout")), 15000)
-    );
-    
-    try {
-      await Promise.race([dbConnectPromise, timeoutPromise]);
-      log('Database connected successfully');
-    } catch (err) {
-      const error = err as Error;
-      log(`WARNING: ${error.message}. Server will continue running with limited functionality.`);
-    }
-    
-    // Setup authentication
-    setupAuth(app);
-    log('Authentication setup complete');
-    
-    // Register routes AFTER server is listening and auth is setup
-    await registerRoutes(app);
-    log('Routes registered successfully');
-
-    // Error handling middleware (should come AFTER routes)
-    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-      const status = err.status || err.statusCode || 500;
-      const message = err.message || "Internal Server Error";
-
-      res.status(status).json({ message });
-    });
-    
-    // Serve static files for production
-    if (process.env.NODE_ENV === 'production') {
-      log('Setting up static file serving for production');
-      // Check if the public directory exists before attempting to serve files
-      const publicPath = path.resolve(__dirname, '..', 'public');
-      
-      if (fs.existsSync(publicPath)) {
-        app.use(express.static(publicPath));
-        
-        // Serve index.html for any non-API routes to support client-side routing
-        app.get('*', (req, res) => {
-          // Skip API routes
-          if (req.path.startsWith('/api')) return;
-          res.sendFile(path.join(publicPath, 'index.html'));
-        });
-      } else {
-        log('Public directory not found, skipping static file serving');
-        
-        // Add a route to handle non-API requests with a simple message
-        app.get('*', (req, res, next) => {
-          if (!req.path.startsWith('/api')) {
-            res.status(200).send(`
-              <html>
-                <head>
-                  <title>Stock Well API</title>
-                  <style>
-                    body { font-family: Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
-                    h1 { color: #2563eb; }
-                    p { margin-bottom: 16px; }
-                    code { background: #f1f5f9; padding: 2px 4px; border-radius: 4px; }
-                  </style>
-                </head>
-                <body>
-                  <h1>Stock Well API Server</h1>
-                  <p>This is the API server for Stock Well. The frontend application is hosted separately at: 
-                    <a href="https://stockwell.netlify.app">https://stockwell.netlify.app</a>
-                  </p>
-                  <p>Available API endpoints:</p>
-                  <ul>
-                    <li><code>GET /api/debug/db-test</code> - Test database connection</li>
-                    <li><code>GET /api/check-users</code> - List users</li>
-                    <li><code>POST /api/direct-login</code> - Login endpoint</li>
-                    <li><code>GET /api/direct-user</code> - Get current user</li>
-                  </ul>
-                </body>
-              </html>
-            `);
-          } else {
-            next();
-          }
-        });
-      }
-    }
-  } catch (error) {
-    log(`Fatal error during server initialization: ${error}`, "error");
-    process.exit(1);
-  }
-})();
+export default app;

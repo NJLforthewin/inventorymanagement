@@ -4,12 +4,13 @@ import {
   type Category, type InsertCategory, type InventoryItem, type InsertInventoryItem,
   type UpdateInventoryItem, type AuditLog, type InsertAuditLog
 } from "@shared/schema";
-import { eq, and, like, gte, lte, desc, inArray, lt, gt, isNotNull, asc, or, count } 
-from "drizzle-orm";import { db, executeSqlQuery } from "./db";
+import { eq, and, like, gte, lte, desc, inArray, lt, gt, isNotNull, asc, or, count, isNull, sql } from "drizzle-orm";
+import { db, executeSqlQuery } from "./db";
 import session from "express-session";
 import createMemoryStore from "memorystore";
 import * as mssql from 'mssql';
 import connectPg from "connect-pg-simple";
+
 
 const MemoryStore = createMemoryStore(session);
 const PostgresSessionStore = connectPg(session);
@@ -55,8 +56,8 @@ export interface IStorage {
       search?: string;
     }
   ): Promise<{ items: InventoryItem[], total: number }>;
-  getOutOfStockItems(): Promise<InventoryItem[]>;
-  getLowStockItems(): Promise<InventoryItem[]>;
+  getLowStockItems(page?: number, limit?: number): Promise<{ items: InventoryItem[], total: number }>;
+  getOutOfStockItems(page?: number, limit?: number): Promise<{ items: InventoryItem[], total: number }>;
   createInventoryItem(item: InsertInventoryItem): Promise<InventoryItem>;
   updateInventoryItem(id: number, item: UpdateInventoryItem): Promise<InventoryItem | undefined>;
   updateInventoryStock(id: number, quantity: number): Promise<InventoryItem | undefined>;
@@ -248,6 +249,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
   
+  
   async toggleUserActive(id: number): Promise<User | undefined> {
     try {
       const [user] = await db.select().from(users).where(eq(users.id, id));
@@ -403,72 +405,176 @@ export class DatabaseStorage implements IStorage {
       throw error;
     }
   }
-  
-  async getInventoryItems(
-    page = 1, 
-    limit = 10,
-    filters?: {
-      status?: string;
-      departmentId?: number;
-      categoryId?: number;
-      search?: string;
-    }
-  ): Promise<{ items: InventoryItem[], total: number }> {
-    try {
-      const offset = (page - 1) * limit;
+  // In your storage.ts
+// In your storage.ts file
+async getInventoryItems(
+  page = 1, 
+  limit = 10,
+  filters?: {
+    status?: string;
+    departmentId?: number;
+    categoryId?: number;
+    search?: string;
+    expiring?: string;
+  }
+): Promise<{ items: InventoryItem[], total: number }> {
+  try {
+    console.log("getInventoryItems called with filters:", filters);
+    
+    const offset = (page - 1) * limit;
+    
+    // Using a base query with proper type handling
+    let query = db.select().from(inventoryItems);
+    
+    // Create a function to handle filter conditions
+    const applyFilters = (baseQuery: any) => {
+      let filteredQuery = baseQuery;
       
-      // Using a base query with proper type handling
-      let query = db.select().from(inventoryItems);
-      
-      // Create a function to handle filter conditions
-      const applyFilters = (baseQuery: any) => {
-        let filteredQuery = baseQuery;
-        
-        if (filters) {
-          if (filters.status) {
-            filteredQuery = filteredQuery.where(eq(inventoryItems.status, filters.status as any));
-          }
-          
-          if (filters.departmentId) {
-            filteredQuery = filteredQuery.where(eq(inventoryItems.departmentId, filters.departmentId));
-          }
-          
-          if (filters.categoryId) {
-            filteredQuery = filteredQuery.where(eq(inventoryItems.categoryId, filters.categoryId));
-          }
-          
-          if (filters.search) {
-            filteredQuery = filteredQuery.where(
-              like(inventoryItems.name, `%${filters.search}%`)
-            );
-          }
+      if (filters) {
+        if (filters.status) {
+          filteredQuery = filteredQuery.where(eq(inventoryItems.status, filters.status as any));
         }
         
-        return filteredQuery;
-      };
+        if (filters.departmentId) {
+          filteredQuery = filteredQuery.where(eq(inventoryItems.departmentId, filters.departmentId));
+        }
+        
+        if (filters.categoryId) {
+          filteredQuery = filteredQuery.where(eq(inventoryItems.categoryId, filters.categoryId));
+        }
+        
+        if (filters.search) {
+          filteredQuery = filteredQuery.where(
+            like(inventoryItems.name, `%${filters.search}%`)
+          );
+        }
+        
+        // Handle expiration filters using raw SQL to avoid any translation issues
+        if (filters.expiring) {
+          console.log(`Processing expiring filter: ${filters.expiring}`);
+          
+          // Create custom SQL for date filtering
+          if (filters.expiring === 'soon') {
+            console.log("Applying 'soon' expiration filter");
+            
+            // Custom SQL query for "soon to expire" items
+            filteredQuery = db.select().from(inventoryItems).where(
+              sql`
+                expiration_date IS NOT NULL
+                AND expiration_date > CURRENT_DATE
+                AND expiration_date <= CURRENT_DATE + INTERVAL '30 day'
+              `
+            );
+            
+            // Reapply other filters if necessary
+            if (filters.status) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.status, filters.status as any));
+            }
+            if (filters.departmentId) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.departmentId, filters.departmentId));
+            }
+            if (filters.categoryId) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.categoryId, filters.categoryId));
+            }
+            if (filters.search) {
+              filteredQuery = filteredQuery.where(like(inventoryItems.name, `%${filters.search}%`));
+            }
+          } else if (filters.expiring === 'expired') {
+            console.log("Applying 'expired' expiration filter");
+            
+            // Custom SQL query for "expired" items
+            filteredQuery = db.select().from(inventoryItems).where(
+              sql`
+                expiration_date IS NOT NULL
+                AND expiration_date <= CURRENT_DATE
+              `
+            );
+            
+            // Reapply other filters if necessary
+            if (filters.status) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.status, filters.status as any));
+            }
+            if (filters.departmentId) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.departmentId, filters.departmentId));
+            }
+            if (filters.categoryId) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.categoryId, filters.categoryId));
+            }
+            if (filters.search) {
+              filteredQuery = filteredQuery.where(like(inventoryItems.name, `%${filters.search}%`));
+            }
+          } else if (filters.expiring === 'no_expiration') {
+            console.log("Applying 'no_expiration' filter");
+            
+            // Custom SQL query for "no expiration" items
+            filteredQuery = db.select().from(inventoryItems).where(
+              sql`expiration_date IS NULL`
+            );
+            
+            // Reapply other filters if necessary
+            if (filters.status) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.status, filters.status as any));
+            }
+            if (filters.departmentId) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.departmentId, filters.departmentId));
+            }
+            if (filters.categoryId) {
+              filteredQuery = filteredQuery.where(eq(inventoryItems.categoryId, filters.categoryId));
+            }
+            if (filters.search) {
+              filteredQuery = filteredQuery.where(like(inventoryItems.name, `%${filters.search}%`));
+            }
+          }
+        }
+      }
       
-      // Apply filters to the query
-      const filteredQuery = applyFilters(query);
-      const items = await filteredQuery.limit(limit).offset(offset);
-      
-      // Build count query with same filters
-      let countQuery = db.select({ count: db.fn.count() }).from(inventoryItems);
-      const filteredCountQuery = applyFilters(countQuery);
-      
-      const [{ count }] = await filteredCountQuery;
-      
-      return {
-        items,
-        total: Number(count)
-      };
-    } catch (error) {
-      console.error("Error getting inventory items:", error);
-      throw error;
-    }
+      return filteredQuery;
+    };
+    
+    // Apply filters to the query
+    const filteredQuery = applyFilters(query);
+    
+    // Log the raw SQL that will be executed
+    console.log("SQL Query:", filteredQuery.toSQL());
+    
+    const items = await filteredQuery.limit(limit).offset(offset);
+    
+    // Build count query with same filters
+    let countQuery = db.select({ count: db.fn.count() }).from(inventoryItems);
+    const filteredCountQuery = applyFilters(countQuery);
+    
+    const [{ count }] = await filteredCountQuery;
+    
+    console.log(`Found ${count} items matching filters`);
+    
+    return {
+      items,
+      total: Number(count)
+    };
+  } catch (error) {
+    console.error("Error getting inventory items:", error);
+    throw error;
   }
-  
-  async getLowStockItems(): Promise<InventoryItem[]> {
+}
+
+
+  async getLowStockItems(page = 1, limit = 10): Promise<{ items: InventoryItem[], total: number }> {
     try {
+      // First, count total items that match the condition
+      const countResult = await db
+        .select({ count: count() })
+        .from(inventoryItems)
+        .where(
+          and(
+            lt(inventoryItems.currentStock, inventoryItems.threshold),
+            gt(inventoryItems.currentStock, 0) // This excludes items with 0 quantity
+          )
+        );
+      
+      const total = Number(countResult[0]?.count) || 0;
+      
+      // Then get the paginated items
+      const offset = (page - 1) * limit;
       const items = await db
         .select()
         .from(inventoryItems)
@@ -479,9 +585,10 @@ export class DatabaseStorage implements IStorage {
           )
         )
         .orderBy(desc(inventoryItems.updatedAt))
-        .limit(5);
+        .limit(limit)
+        .offset(offset);
       
-      return items;
+      return { items, total };
     } catch (error) {
       console.error("Error getting low stock items:", error);
       throw error;
@@ -489,23 +596,32 @@ export class DatabaseStorage implements IStorage {
   }
 
 // For DatabaseStorage class
-async getOutOfStockItems(): Promise<InventoryItem[]> {
+async getOutOfStockItems(page = 1, limit = 10): Promise<{ items: InventoryItem[], total: number }> {
   try {
-    // Use currentStock instead of quantity
+    // First, count total items that match the condition
+    const countResult = await db
+      .select({ count: count() })
+      .from(inventoryItems)
+      .where(eq(inventoryItems.currentStock, 0));
+    
+    const total = Number(countResult[0]?.count) || 0;
+    
+    // Then get the paginated items
+    const offset = (page - 1) * limit;
     const items = await db
       .select()
       .from(inventoryItems)
       .where(eq(inventoryItems.currentStock, 0))
       .orderBy(desc(inventoryItems.updatedAt))
-      .limit(5);
+      .limit(limit)
+      .offset(offset);
     
-    return items;
+    return { items, total };
   } catch (error) {
     console.error("Error getting out of stock items:", error);
     throw error;
   }
 }
-  
 
 async getSoonToExpireItems(): Promise<InventoryItem[]> {
   try {
@@ -1419,6 +1535,7 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
       departmentId?: number;
       categoryId?: number;
       search?: string;
+      expiring?: string; // Add this to the filters type
     }
   ): Promise<{ items: InventoryItem[], total: number }> {
     let allItems = Array.from(this.inventory.values());
@@ -1441,8 +1558,47 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
         const searchLower = filters.search.toLowerCase();
         allItems = allItems.filter(item => 
           item.name.toLowerCase().includes(searchLower) || 
-          item.itemId.toLowerCase().includes(searchLower)
+          (item.itemId && item.itemId.toLowerCase().includes(searchLower))
         );
+      }
+      
+      // Add expiration filter handling
+      if (filters.expiring) {
+        console.log(`Processing in-memory expiring filter: ${filters.expiring}`);
+        
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); // Set to start of day
+        
+        if (filters.expiring === 'soon') {
+          const thirtyDaysFromNow = new Date();
+          thirtyDaysFromNow.setDate(today.getDate() + 30);
+          
+          allItems = allItems.filter(item => {
+            if (!item.expirationDate) return false;
+            
+            const expDate = typeof item.expirationDate === 'string' 
+              ? new Date(item.expirationDate) 
+              : item.expirationDate;
+            
+            return expDate > today && expDate <= thirtyDaysFromNow;
+          });
+        } else if (filters.expiring === 'expired') {
+          allItems = allItems.filter(item => {
+            if (!item.expirationDate) return false;
+            
+            const expDate = typeof item.expirationDate === 'string' 
+              ? new Date(item.expirationDate) 
+              : item.expirationDate;
+            
+            return expDate <= today;
+          });
+        } else if (filters.expiring === 'no_expiration') {
+          allItems = allItems.filter(item => {
+            return !item.expirationDate;
+          });
+        }
+        
+        console.log(`After expiration filtering: ${allItems.length} items`);
       }
     }
     
@@ -1455,9 +1611,9 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     };
   }
   
-  async getLowStockItems(): Promise<InventoryItem[]> {
+  async getLowStockItems(page = 1, limit = 10): Promise<{ items: InventoryItem[], total: number }> {
     // Get all inventory items, filter for low stock but not out of stock
-    const lowStockItems = Array.from(this.inventory.values())
+    const allLowStockItems = Array.from(this.inventory.values())
       .filter(item => 
         item.currentStock < item.threshold && 
         item.currentStock > 0 // This excludes items with 0 quantity
@@ -1467,30 +1623,38 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
         const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
         const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
         return dateB - dateA;
-      })
-      .slice(0, 5); // Limit to 5 items
+      });
     
-    return lowStockItems;
+    // Calculate pagination
+    const offset = (page - 1) * limit;
+    const paginatedItems = allLowStockItems.slice(offset, offset + limit);
+    
+    return {
+      items: paginatedItems,
+      total: allLowStockItems.length
+    };
   }
-
-  // Add this method to your MemStorage class
-async getOutOfStockItems(): Promise<InventoryItem[]> {
-  // Get all inventory items
-  const allItems = Array.from(this.inventory.values());
   
-  // Filter for items with currentStock = 0
-  const outOfStockItems = allItems
-    .filter(item => item.currentStock === 0)
-    .sort((a, b) => {
-      // Sort by updatedAt (newest first)
-      const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-      return dateB - dateA;
-    })
-    .slice(0, 5); // Limit to 5 items
-  
-  return outOfStockItems;
-}
+  async getOutOfStockItems(page = 1, limit = 10): Promise<{ items: InventoryItem[], total: number }> {
+    // Get all inventory items
+    const allOutOfStockItems = Array.from(this.inventory.values())
+      .filter(item => item.currentStock === 0)
+      .sort((a, b) => {
+        // Sort by updatedAt (newest first)
+        const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return dateB - dateA;
+      });
+    
+    // Calculate pagination
+    const offset = (page - 1) * limit;
+    const paginatedItems = allOutOfStockItems.slice(offset, offset + limit);
+    
+    return {
+      items: paginatedItems,
+      total: allOutOfStockItems.length
+    };
+  }
   
 async createInventoryItem(itemData: InsertInventoryItem): Promise<InventoryItem> {
   const id = this.inventoryIdCounter++;

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: hospital-inventory-api
+    env: node
+    buildCommand: npm install && npm run build:server
+    startCommand: npm run start:server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: FRONTEND_URL
+        value: "https://stockwell.netlify.app"

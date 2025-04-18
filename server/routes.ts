@@ -61,8 +61,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   app.get("/api/dashboard/low-stock", isAuthenticated, async (req, res, next) => {
     try {
-      const items = await storage.getLowStockItems();
-      res.json(items);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      
+      const result = await storage.getLowStockItems(page, limit);
+      
+      res.json({
+        items: result.items,
+        page,
+        totalPages: Math.ceil(result.total / limit),
+        totalItems: result.total
+      });
     } catch (error) {
       next(error);
     }
@@ -70,12 +79,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/dashboard/out-of-stock", isAuthenticated, async (req, res, next) => {
     try {
-      const items = await storage.getOutOfStockItems();
-      res.json(items);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      
+      const result = await storage.getOutOfStockItems(page, limit);
+      
+      res.json({
+        items: result.items,
+        page,
+        totalPages: Math.ceil(result.total / limit),
+        totalItems: result.total
+      });
     } catch (error) {
       next(error);
     }
   });
+
+  
   
   // Department routes
   app.get("/api/departments", isAuthenticated, async (req, res, next) => {
@@ -313,105 +333,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
       next(error);
     }
   });
-  app.get("/api/inventory", isAuthenticated, async (req, res, next) => {
-    try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 10; // Items per page
-      
-      // Get all inventory items
-      let result = await storage.getInventoryItems();
-      let filteredItems = [...result.items]; // Create a new working array
-      
-      if (req.query.departmentId) {
-        const departmentId = parseInt(req.query.departmentId as string);
-        filteredItems = filteredItems.filter((item: InventoryItem) => item.departmentId === departmentId);
-      }
-      
-      if (req.query.categoryId) {
-        const categoryId = parseInt(req.query.categoryId as string);
-        filteredItems = filteredItems.filter((item: InventoryItem) => item.categoryId === categoryId);
-      }
-      
-      if (req.query.status) {
-        const status = req.query.status as string;
-        filteredItems = filteredItems.filter((item: InventoryItem) => item.status === status);
-      }
-      
-      if (req.query.search) {
-        const search = (req.query.search as string).toLowerCase();
-        filteredItems = filteredItems.filter((item: InventoryItem) => 
-          item.name.toLowerCase().includes(search) || 
-          item.itemId.toLowerCase().includes(search)
-        );
-      }
-      
-      // Enhanced expiration filtering without logging
-      if (req.query.expiring) {
-        const expiring = req.query.expiring as string;
-        const today = new Date();
-        
-        if (expiring === 'soon') {
-          const thirtyDaysFromNow = new Date();
-          thirtyDaysFromNow.setDate(today.getDate() + 30);
-          
-          filteredItems = filteredItems.filter((item: InventoryItem) => {
-            if (!item.expirationDate) return false;
-            
-            // Parse the expiration date and ensure it's a valid Date
-            let expDate: Date;
-            try {
-              expDate = new Date(item.expirationDate);
-              // Check if the date is valid
-              if (isNaN(expDate.getTime())) {
-                return false;
-              }
-            } catch (error) {
-              return false;
-            }
-            
-            // Check if the item is expiring soon
-            return expDate > today && expDate <= thirtyDaysFromNow;
-          });
-          
-        } else if (expiring === 'expired') {
-          filteredItems = filteredItems.filter((item: InventoryItem) => {
-            if (!item.expirationDate) return false;
-            
-            let expDate: Date;
-            try {
-              expDate = new Date(item.expirationDate);
-              if (isNaN(expDate.getTime())) return false;
-            } catch (error) {
-              return false;
-            }
-            
-            return expDate <= today;
-          });
-          
-        } else if (expiring === 'no_expiration') {
-          filteredItems = filteredItems.filter((item: InventoryItem) => {
-            return !item.expirationDate;
-          });
-        }
-      }
-      
-      // Calculate pagination
-      const totalItems = filteredItems.length;
-      const totalPages = Math.ceil(totalItems / limit);
-      const startIndex = (page - 1) * limit;
-      const endIndex = Math.min(startIndex + limit, totalItems);
-      const paginatedItems = filteredItems.slice(startIndex, endIndex);
-      
-      res.json({
-        items: paginatedItems,
-        page,
-        totalPages,
-        totalItems
-      });
-    } catch (error) {
-      next(error);
+
+// In your routes.ts file
+app.get("/api/inventory", isAuthenticated, async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    
+    // Create filter object from query parameters
+    const filters: any = {};
+    
+    if (req.query.departmentId) {
+      filters.departmentId = parseInt(req.query.departmentId as string);
     }
-  });
+    
+    if (req.query.categoryId) {
+      filters.categoryId = parseInt(req.query.categoryId as string);
+    }
+    
+    if (req.query.status) {
+      filters.status = req.query.status as string;
+    }
+    
+    if (req.query.search) {
+      filters.search = req.query.search as string;
+    }
+    
+    if (req.query.expiring) {
+      filters.expiring = req.query.expiring as string;
+      console.log(`Expiring filter: ${filters.expiring}`); // Debug log
+    }
+    
+    console.log("Filters being sent to getInventoryItems:", filters); // Debug log
+    
+    // Pass all filters to the storage layer
+    const result = await storage.getInventoryItems(page, limit, filters);
+    
+    res.json({
+      items: result.items,
+      page,
+      totalPages: Math.ceil(result.total / limit),
+      totalItems: result.total
+    });
+  } catch (error) {
+    console.error("Error in inventory API:", error); // Better error logging
+    next(error);
+  }
+});
   app.get("/api/inventory/:id", isAuthenticated, async (req, res, next) => {
     try {
       const id = parseInt(req.params.id);

@@ -1,3 +1,5 @@
+// client/src/pages/reports-page.tsx
+
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -27,7 +29,7 @@ interface InventoryResponse {
   items: InventoryItem[];
   page: number;
   limit: number;
-  total: number;
+  totalItems: number;
   totalPages: number;
 }
 
@@ -37,6 +39,7 @@ export default function ReportsPage() {
   });
   const [page, setPage] = useState(1);
   const { toast } = useToast();
+  const pageSize = 10; // Items per page for the report table
 
   // Fetch departments
   const { data: departments } = useQuery<Department[]>({
@@ -53,20 +56,41 @@ export default function ReportsPage() {
     queryKey: ["/api/dashboard/stats"],
   });
 
-  // Fetch all inventory items for reporting
-  const { data: inventoryData, isLoading } = useQuery<InventoryResponse>({
-    queryKey: ["/api/inventory", page, { limit: 1000 }],
+  // Fetch chart data (all items, since we need them for the charts)
+  const { data: allInventoryData } = useQuery<InventoryResponse>({
+    queryKey: ["/api/inventory", 1, { limit: 1000 }],
     queryFn: async () => {
-      const url = `/api/inventory?page=${page}&limit=1000`;
+      const url = `/api/inventory?page=1&limit=1000`;
       return (await fetch(url)).json();
     },
   });
 
-  const items = inventoryData?.items || [];
+  // Fetch paginated data for the report table
+  const { data: reportInventoryData, isLoading: isReportLoading } = useQuery<InventoryResponse>({
+    queryKey: ["/api/inventory/report", page, pageSize],
+    queryFn: async () => {
+      const url = `/api/inventory?page=${page}&limit=${pageSize}`;
+      console.log(`Fetching report data: ${url}`);
+      const response = await fetch(url);
+      const data = await response.json();
+      console.log("Report API response:", data);
+      return data;
+    },
+  });
+
+  // Data for charts
+  const allItems = allInventoryData?.items || [];
+  
+  // Data for report table
+  const reportItems = reportInventoryData?.items || [];
+  const totalPages = reportInventoryData?.totalPages || 1;
+  const currentPage = reportInventoryData?.page || page;
+
+  console.log(`Current page: ${currentPage}, Total pages: ${totalPages}, Items: ${reportItems.length}`);
 
   // Process data for department distribution chart
   const departmentData = departments?.map(dept => {
-    const itemCount = items.filter(item => item.departmentId === dept.id).length;
+    const itemCount = allItems.filter(item => item.departmentId === dept.id).length;
     return {
       name: dept.name,
       count: itemCount
@@ -77,24 +101,24 @@ export default function ReportsPage() {
   const statusData = [
     {
       name: "In Stock",
-      value: items.filter(item => item.status === "in_stock").length,
+      value: allItems.filter(item => item.status === "in_stock").length,
       color: "#4caf50" // green
     },
     {
       name: "Low Stock",
-      value: items.filter(item => item.status === "low_stock").length,
+      value: allItems.filter(item => item.status === "low_stock").length,
       color: "#ff9800" // amber
     },
     {
       name: "Out of Stock",
-      value: items.filter(item => item.status === "out_of_stock").length,
+      value: allItems.filter(item => item.status === "out_of_stock").length,
       color: "#f44336" // red
     }
   ];
 
   // Process data for category distribution chart
   const categoryData = categories?.map(cat => {
-    const itemCount = items.filter(item => item.categoryId === cat.id).length;
+    const itemCount = allItems.filter(item => item.categoryId === cat.id).length;
     return {
       name: cat.name,
       count: itemCount
@@ -341,16 +365,14 @@ export default function ReportsPage() {
         <CardContent>
           <DataTable
             columns={columns}
-            data={items.slice(0, 10)} // Show only first 10 for this view
-            page={page}
-            totalPages={Math.ceil((items.length || 0) / 10)}
+            data={reportItems}
+            page={currentPage}
+            totalPages={totalPages}
             onPageChange={setPage}
-            isLoading={isLoading}
+            isLoading={isReportLoading}
           />
         </CardContent>
       </Card>
     </AppLayout>
   );
 }
-
-
