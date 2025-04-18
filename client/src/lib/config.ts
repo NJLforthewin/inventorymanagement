@@ -1,4 +1,3 @@
-// config.ts
 // Detect environment and set appropriate API base URL
 const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 

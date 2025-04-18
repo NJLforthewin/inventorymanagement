@@ -1,11 +1,10 @@
-// client/src/hooks/use-auth.tsx
 import { createContext, useContext, useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { LoginUser } from "@shared/schema";
 import axios from "axios";
 
 // Define environment variables
-const API_URL = import.meta.env.VITE_API_URL || "/api";
+const API_URL = import.meta.env.VITE_API_URL || "";
 
 // Create axios instance
 const api = axios.create({
@@ -47,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const checkAuth = async () => {
       try {
         setIsLoading(true);
-        const response = await api.get("/user");
+        const response = await api.get("/api/user");
         
         if (response.data) {
           setUser(response.data);
@@ -60,14 +59,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false);
       }
     };
-    
+        
     checkAuth();
   }, []);
   
   // Login mutation
   const loginMutation = useMutation({
     mutationFn: async (loginData: LoginUser) => {
-      const response = await api.post("/login", loginData);
+      const response = await api.post("/api/login", loginData);
       return response.data;
     },
     onSuccess: (data) => {
@@ -85,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Logout function
   const logout = async () => {
     try {
-      await api.post("/logout");
+      await api.post("/api/logout");
       setUser(null);
       // Clear the expiration alert flag when logging out
       sessionStorage.removeItem('expirationAlertShown');

@@ -493,8 +493,7 @@ app.get("/api/inventory", isAuthenticated, async (req, res, next) => {
     } catch (error) {
       next(error);
     }
-  });
-  
+  });  
   // User routes (admin only)
   app.get("/api/users", isAdmin, async (req, res, next) => {
     try {
