@@ -17,7 +17,7 @@ app.use(express.json());
 // Configure CORS for production
 app.use(cors({
   // Allow requests from your Netlify frontend domain or any origin during development
-  origin: process.env.FRONTEND_URL || '*',
+  origin: process.env.FRONTEND_URL || 'https://stockwell.netlify.app',
   credentials: true,
 }));
 
