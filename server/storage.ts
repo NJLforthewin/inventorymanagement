@@ -1024,7 +1024,6 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
 
   // Create categories
   const ppe = await this.createCategory({ name: "PPE", description: "Personal Protective Equipment" });
-  const pharmaceuticals = await this.createCategory({ name: "Pharmaceuticals", description: "Medicines and drugs" });
   const equipment = await this.createCategory({ name: "Equipment", description: "Medical equipment" });
   const supplies = await this.createCategory({ name: "Supplies", description: "General medical supplies" });
   
@@ -1055,18 +1054,6 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     expirationDate: getDateInFuture(120) // 4 months from now
   });
   
-  // In-stock item 2
-  this.createInventoryItem({
-    itemId: "MED-103",
-    name: "Paracetamol 500mg",
-    description: "Pain and fever medication",
-    departmentId: general.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 85,
-    unit: "boxes",
-    threshold: 30,
-    expirationDate: getDateInFuture(180) // 6 months from now
-  });
   
   this.createInventoryItem({
     itemId: "EQP-108",
@@ -1106,18 +1093,6 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     expirationDate: getDateInFuture(365) // 1 year from now
   });
   
-  // In-stock item 6
-  this.createInventoryItem({
-    itemId: "MED-104",
-    name: "Hydrocortisone Cream",
-    description: "Anti-inflammatory skin cream",
-    departmentId: pediatrics.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 40,
-    unit: "tubes",
-    threshold: 15,
-    expirationDate: getDateInFuture(150) // 5 months from now
-  });
   
   // In-stock item 7
   this.createInventoryItem({
@@ -1181,19 +1156,7 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     expirationDate: getDateInFuture(300) // 10 months from now
   });
   
-  // In-stock item 9
-  this.createInventoryItem({
-    itemId: "MED-105",
-    name: "Multivitamin Tablets",
-    description: "General multivitamins",
-    departmentId: general.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 55,
-    unit: "bottles",
-    threshold: 20,
-    expirationDate: getDateInFuture(200) // ~6.5 months from now
-  });
-  
+
   // In-stock item 10
   this.createInventoryItem({
     itemId: "PPE-008",
@@ -1222,19 +1185,7 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     expirationDate: getDateInFuture(90) // 3 months from now
   });
   
-  // Low-stock item 2
-  this.createInventoryItem({
-    itemId: "MED-106",
-    name: "Aspirin 81mg",
-    description: "Low-dose aspirin",
-    departmentId: cardiology.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 12,
-    unit: "bottles",
-    threshold: 25,
-    expirationDate: getDateInFuture(100) // ~3.3 months from now
-  });
-  
+ 
   // Low-stock item 3
   this.createInventoryItem({
     itemId: "SUP-210",
@@ -1261,47 +1212,7 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     expirationDate: getDateInFuture(150) // 5 months from now
   });
   
-  // Low-stock item 5
-  this.createInventoryItem({
-    itemId: "MED-108",
-    name: "Antibiotic Ointment",
-    description: "Topical antibiotic ointment",
-    departmentId: pediatrics.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 7,
-    unit: "tubes",
-    threshold: 20,
-    expirationDate: getDateInFuture(75) // 2.5 months from now
-  });
-  
-  // --- 3 SOON-TO-EXPIRE ITEMS (WITHIN 2 WEEKS) ---
-  
-  // Soon-to-expire item 1
-  this.createInventoryItem({
-    itemId: "MED-101",
-    name: "Amoxicillin 500mg",
-    description: "Antibiotic medication",
-    departmentId: general.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 45,
-    unit: "boxes",
-    threshold: 20,
-    expirationDate: getDateInFuture(10) // 10 days from now
-  });
-  
-  // Soon-to-expire item 2
-  this.createInventoryItem({
-    itemId: "MED-102",
-    name: "Ibuprofen 200mg",
-    description: "Pain relief medication",
-    departmentId: emergency.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 30,
-    unit: "bottles",
-    threshold: 15,
-    expirationDate: getDateInFuture(5) // 5 days from now
-  });
-  
+
   // Soon-to-expire item 3
   this.createInventoryItem({
     itemId: "SUP-200",
@@ -1314,49 +1225,19 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     threshold: 15,
     expirationDate: getDateInFuture(12) // 12 days from now
   });
-  
-  // --- 5 ALREADY EXPIRED ITEMS ---
-  
-  // Expired item 1
+
   this.createInventoryItem({
-    itemId: "MED-050",
-    name: "Acetaminophen 500mg",
-    description: "Pain relief medication",
-    departmentId: pediatrics.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 12,
+    itemId: "SUP-200",
+    name: "Bandages (Sterile)",
+    description: "Sterile adhesive bandages",
+    departmentId: emergency.id,
+    categoryId: supplies.id,
+    currentStock: 5, // Also low stock!
     unit: "boxes",
-    threshold: 10,
-    expirationDate: getDateInPast(10) // 10 days ago
+    threshold: 40,
+    expirationDate: getDateInFuture(15) // 12 days from now
   });
   
-  // Expired item 2
-  this.createInventoryItem({
-    itemId: "MED-051",
-    name: "Cough Syrup",
-    description: "Cough suppressant",
-    departmentId: pediatrics.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 8,
-    unit: "bottles",
-    threshold: 12,
-    expirationDate: getDateInPast(5) // 5 days ago
-  });
-  
-  // Expired item 3
-  this.createInventoryItem({
-    itemId: "MED-055",
-    name: "Diphenhydramine",
-    description: "Antihistamine medication",
-    departmentId: general.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 4,
-    unit: "boxes",
-    threshold: 10,
-    expirationDate: getDateInPast(15) // 15 days ago
-  });
-  
-  // Expired item 4
   this.createInventoryItem({
     itemId: "SUP-220",
     name: "Sterile Wipes",
@@ -1369,18 +1250,6 @@ async getCriticalExpirationItems(): Promise<InventoryItem[]> {
     expirationDate: getDateInPast(30) // 30 days ago
   });
   
-  // Expired item 5
-  this.createInventoryItem({
-    itemId: "MED-056",
-    name: "Topical Anesthetic",
-    description: "Local anesthetic gel",
-    departmentId: emergency.id,
-    categoryId: pharmaceuticals.id,
-    currentStock: 6,
-    unit: "tubes",
-    threshold: 8,
-    expirationDate: getDateInPast(3) // 3 days ago
-  });
 }
   // User operations
   async getUser(id: number): Promise<User | undefined> {
